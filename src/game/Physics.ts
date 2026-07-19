@@ -272,8 +272,18 @@ export function updateVehicle(
   const trackWidth = 1.62;
   const h_cg = 0.48;
   const tireRadius = 0.33;
-  const lf = wheelbase * (1 - spec.weightDistribution);
-  const lr = wheelbase * spec.weightDistribution;
+  // STEERING UNIFORMITY: compress each car's weight distribution toward 50/50 for
+  // the yaw moment arms ONLY. Raw (uncompressed) wd made front-heavy FWD cars
+  // (gti/ek9, wd ~0.62) understeer so hard they "wouldn't turn", while rear-heavy
+  // mid-engine cars (nsx/f40/sv12, wd ~0.42) over-rotated and scrubbed nearly all
+  // their speed (spun out) on a moderate input — a 2-3x turn-in spread. Pulling
+  // the STEERING balance toward the (well-behaved) 50/50 cars equalizes turn-in
+  // for every car without touching grip, power or mass. 0 = fully uniform,
+  // 1 = raw physical spread.
+  const WD_UNIFORM = 0.27;
+  const wdEff = 0.5 + (spec.weightDistribution - 0.5) * WD_UNIFORM;
+  const lf = wheelbase * (1 - wdEff);
+  const lr = wheelbase * wdEff;
 
   // ---- 1. GEARBOX -----------------------------------------------------------
   if (state.clutchTimer > 0) state.clutchTimer -= dt;
@@ -442,10 +452,14 @@ export function updateVehicle(
   const speedMs = Math.abs(state.vx);
   const speedKmh = speedMs * 3.6;
   // UNIFORM steering sensitivity: base lock and steer rate are the same for
-  // every car and every attachment (no maxSteerMult / steerRateMult), then
-  // dialled up hard for a much sharper, more eager response. Attachments still
-  // change grip/power/drift character — just not the raw steering feel.
-  const maxSteer = 0.82;
+  // every car and every attachment (no maxSteerMult / steerRateMult), dialled up
+  // (0.82 -> 0.86) for a sharper response. Attachments still change
+  // grip/power/drift character — just not the raw steering feel. The other half
+  // of "uniform" is the WD_UNIFORM weight-distribution compression above (the
+  // yaw moment arms), which is what actually stops some cars refusing to turn
+  // while others spin — this lock/rate uniformity was necessary but not
+  // sufficient on its own.
+  const maxSteer = 0.86;
   // Retain far more lock at speed (floor 0.74 -> 0.86) so the front bites at
   // every velocity, not just in town.
   const speedFactor = Math.max(0.86, 1 / (1 + speedKmh / 270));
