@@ -194,7 +194,10 @@ export class AIEngine {
     const boostSp = Math.sqrt(ai.perfBoost);
     const paceMult = Math.min(1.04, 0.84 + ai.skill * 0.24)
       * (isWet ? 0.82 : 1)
-      * (trackId === 'rally' ? 0.75 : 1)
+      // Loose grip: whole-track rally OR a per-node dirt/gravel biome band (e.g.
+      // Highland's Dirt Rally section) — target a gravel-appropriate corner speed
+      // so the AI doesn't run wide on the asphalt profile and grind the rail.
+      * (trackId === 'rally' || surf.surface === 'gravel' ? 0.75 : 1)
       // Grip-aware: street/drift-shod AI corner a touch slower so low-grip cars
       // never exceed their tyres and run wide — they hold the apex cleanly.
       * ((ai.loadout.tires === 'street' || ai.loadout.tires === 'drift') ? 0.93 : 1)

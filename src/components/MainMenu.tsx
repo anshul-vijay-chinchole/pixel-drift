@@ -107,7 +107,7 @@ export const MainMenu: React.FC<MainMenuProps> = ({ onOpenGarage }) => {
                     className={`track-card ${selectedTrack === t.id ? 'selected' : ''}`}
                     onClick={() => setSelectedTrack(t.id as TrackId)}
                   >
-                    {t.id === 'grandtour' && <span className="flagship-badge">★ FLAGSHIP</span>}
+                    {t.id === 'highland' && <span className="flagship-badge">★ FLAGSHIP</span>}
                     <TrackThumb points={t.idealLine} closed={t.isClosed} active={selectedTrack === t.id} />
                     <div className="track-card-info">
                       <span className="track-card-name">{t.name}</span>

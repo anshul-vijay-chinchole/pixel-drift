@@ -424,11 +424,16 @@ export class GameGraphics {
     let skirtMat: THREE.MeshStandardMaterial | null = null;
     if (this.hasRelief) {
       skirtMat = groundMat.clone();
+      skirtMat.vertexColors = true; // per-node biome tint (see SKIRT_TINT)
       const sg = new THREE.BufferGeometry();
-      const sv: number[] = []; const suv: number[] = []; const six: number[] = [];
+      const sv: number[] = []; const suv: number[] = []; const six: number[] = []; const scol: number[] = [];
       const n = tp.length;
       for (let i = 0; i < n; i++) {
         const p = tp[i]; const hw = p.width / 2;
+        // Only per-node biome tint MULTI-biome tracks. Single-biome relief tracks
+        // have no p.biome, so tinting the whole skirt would darken it against the
+        // untinted, same-texture ground plane and leave a seam — keep them neutral.
+        const tint: [number, number, number] = p.biome ? skirtTint(p.biome, trackDef.theme) : [1, 1, 1];
         for (const side of [-1, 1]) {
           for (let k = 0; k < SKIRT_OFFS.length; k++) {
             const d = hw + SKIRT_OFFS[k];
@@ -436,6 +441,7 @@ export class GameGraphics {
             const z = p.pos.z + p.normal.z * side * d;
             sv.push(x, this.groundY(p.pos.y, SKIRT_OFFS[k]), z);
             suv.push(x / 6, z / 6); // planar world-space UVs, 6 m per tile
+            scol.push(tint[0], tint[1], tint[2]);
           }
         }
       }
@@ -452,6 +458,7 @@ export class GameGraphics {
       }
       sg.setAttribute('position', new THREE.Float32BufferAttribute(sv, 3));
       sg.setAttribute('uv', new THREE.Float32BufferAttribute(suv, 2));
+      sg.setAttribute('color', new THREE.Float32BufferAttribute(scol, 3));
       sg.setIndex(six); sg.computeVertexNormals();
       const skirt = new THREE.Mesh(sg, skirtMat);
       skirt.receiveShadow = true;
@@ -513,6 +520,7 @@ export class GameGraphics {
 
     this.buildCurbsAndLines(trackDef, tp);
     this.generateScenery(trackDef, tp);
+    this.buildLandmarks(trackDef, tp);
     this.scene.add(this.sceneryGroup);
     this.scene.add(this.trackDecoGroup);
   }
@@ -797,6 +805,96 @@ export class GameGraphics {
     }
   }
 
+  // Signature landmarks — the premium, always-visible structures that give the
+  // map its identity: a start/finish gantry over the line, a summit observation
+  // tower that defines the skyline from anywhere on the loop, and gantry cranes
+  // in the industrial-port region. All sit BEYOND the wall so they never block
+  // the road, and on the terrain skirt so they never float.
+  private buildLandmarks(trackDef: TrackDefinition, tp: TrackPoint[]) {
+    const concrete = new THREE.MeshStandardMaterial({ color: '#b8b3ab', roughness: 0.85, flatShading: true });
+    const steel = new THREE.MeshStandardMaterial({ color: '#6a7078', roughness: 0.6, metalness: 0.3, flatShading: true });
+    const dark = new THREE.MeshStandardMaterial({ color: '#33363c', roughness: 0.8, flatShading: true });
+    const n = tp.length;
+
+    // --- Start/finish gantry (closed tracks) — an arch straddling the road. ---
+    if (trackDef.isClosed) {
+      const p = tp[0]; const hw = p.width / 2;
+      const nx = p.normal.x, nz = p.normal.z;
+      const postGeo = new THREE.BoxGeometry(1.4, 9, 1.4);
+      for (const side of [-1, 1]) {
+        const px = p.pos.x + nx * side * (hw + 1.4), pz = p.pos.z + nz * side * (hw + 1.4);
+        const post = new THREE.Mesh(postGeo, steel);
+        post.position.set(px, p.pos.y + 4.5, pz); post.castShadow = true;
+        this.sceneryGroup.add(post);
+      }
+      const span = p.width + 4;
+      const beam = new THREE.Mesh(new THREE.BoxGeometry(span, 1.4, 1.6), steel);
+      beam.position.set(p.pos.x, p.pos.y + 9.4, p.pos.z);
+      // Long local +X must run ACROSS the road (along the normal) to bridge the two
+      // posts. atan2(tangent.x, tangent.z) aligns local +Z with the tangent, which
+      // leaves +X on the normal — the axis the posts are separated along.
+      beam.rotation.y = Math.atan2(p.tangent.x, p.tangent.z); beam.castShadow = true;
+      const banner = new THREE.Mesh(new THREE.BoxGeometry(span * 0.82, 2.4, 0.4),
+        new THREE.MeshStandardMaterial({ color: '#12141c', roughness: 0.7, emissive: '#101427', emissiveIntensity: 0.4 }));
+      banner.position.set(p.pos.x, p.pos.y + 7.7, p.pos.z); banner.rotation.y = beam.rotation.y;
+      // Chequered strip under the banner.
+      const strip = new THREE.Mesh(new THREE.BoxGeometry(span * 0.82, 0.5, 0.5),
+        new THREE.MeshStandardMaterial({ color: '#e8e8ea', roughness: 0.6 }));
+      strip.position.set(p.pos.x, p.pos.y + 6.4, p.pos.z); strip.rotation.y = beam.rotation.y;
+      this.sceneryGroup.add(beam, banner, strip);
+    }
+
+    // --- Summit observation tower (tracks with real relief). Placed just past
+    // the wall at the single highest node — a beacon-topped landmark you can see
+    // across the whole valley. ---
+    if (this.hasRelief) {
+      let hi = 0; for (let i = 1; i < n; i++) if (tp[i].pos.y > tp[hi].pos.y) hi = i;
+      const p = tp[hi]; const hw = p.width / 2;
+      const margin = wallMargin(p.biome || trackDef.theme);
+      const off = hw + margin + 10;
+      const bx = p.pos.x + p.normal.x * off, bz = p.pos.z + p.normal.z * off;
+      const by = this.groundY(p.pos.y, off - hw);
+      const shaft = new THREE.Mesh(new THREE.CylinderGeometry(2.4, 4.2, 40, 8), concrete);
+      shaft.position.set(bx, by + 20, bz); shaft.castShadow = true;
+      const deck = new THREE.Mesh(new THREE.CylinderGeometry(6.5, 6.5, 3.4, 10), steel);
+      deck.position.set(bx, by + 37, bz); deck.castShadow = true;
+      const roof = new THREE.Mesh(new THREE.ConeGeometry(7.2, 4, 10), dark);
+      roof.position.set(bx, by + 41, bz); roof.castShadow = true;
+      const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.3, 8, 5), steel);
+      mast.position.set(bx, by + 46, bz);
+      const beacon = new THREE.Mesh(new THREE.SphereGeometry(0.9, 8, 8), new THREE.MeshBasicMaterial({ color: '#ff3b30' }));
+      beacon.position.set(bx, by + 50, bz);
+      this.sceneryGroup.add(shaft, deck, roof, mast, beacon);
+    }
+
+    // --- Industrial-port gantry cranes — in any harbour-biome span. A few big
+    // A-frame cranes with a jib reaching out over the quay. ---
+    const portNodes: number[] = [];
+    for (let i = 0; i < n; i++) if ((tp[i].biome || trackDef.theme) === 'harbour') portNodes.push(i);
+    if (portNodes.length > 4) {
+      const legGeo = new THREE.BoxGeometry(1.2, 20, 1.2);
+      const picks = [0.25, 0.55, 0.8].map(f => portNodes[Math.floor(f * (portNodes.length - 1))]);
+      let sideFlip = 1;
+      for (const i of picks) {
+        const p = tp[i]; const hw = p.width / 2;
+        const margin = wallMargin('harbour');
+        const off = hw + margin + 12; sideFlip *= -1;
+        const cx = p.pos.x + p.normal.x * sideFlip * off, cz = p.pos.z + p.normal.z * sideFlip * off;
+        const cy = this.groundY(p.pos.y, off - hw);
+        const ang = Math.atan2(p.tangent.x, p.tangent.z);
+        const crane = new THREE.Group();
+        for (const lx of [-4, 4]) for (const lz of [-3, 3]) {
+          const leg = new THREE.Mesh(legGeo, steel); leg.position.set(lx, 10, lz); leg.castShadow = true; crane.add(leg);
+        }
+        const cap = new THREE.Mesh(new THREE.BoxGeometry(11, 3, 9), dark); cap.position.y = 21; crane.add(cap);
+        const jib = new THREE.Mesh(new THREE.BoxGeometry(3, 1.6, 30), steel); jib.position.set(0, 22, 6); jib.castShadow = true; crane.add(jib);
+        const cw = new THREE.Mesh(new THREE.BoxGeometry(4, 3, 5), concrete); cw.position.set(0, 22, -9); crane.add(cw);
+        crane.position.set(cx, cy, cz); crane.rotation.y = ang;
+        this.sceneryGroup.add(crane);
+      }
+    }
+  }
+
   public buildCarGraphics(custom: CarLoadout, carId?: string) {
     this.scene.remove(this.carGroup);
     const built = buildCarMesh(custom.color, { player: true, custom, profile: carProfileFor(carId) });
@@ -1070,5 +1168,19 @@ const ROUGH: Record<string, number> = {
 // pavement downtown, concrete apron at the airport, sand in the desert.
 const GROUND_TEX: Record<string, string> = {
   harbour: 'grass', mountain: 'meadow', coast: 'grass', forest: 'forestfloor',
-  airport: 'concrete', city: 'citypav', desert: 'sand'
+  airport: 'concrete', city: 'citypav', desert: 'redrock'  // PixelLab red-rock canyon floor
 };
+
+// Per-biome multiplicative tint for the road-following terrain skirt, so a
+// multi-biome flagship (Highland Run) reads its region on the GROUND beside the
+// road — green through the forest, tan-red through the desert/canyon, grey on
+// the rock, concrete downtown — not just in the scenery. Tints multiply over the
+// grey 'rock' skirt texture, so values near 1 shift hue without over-darkening.
+const SKIRT_TINT: Record<string, [number, number, number]> = {
+  city: [0.66, 0.67, 0.72], harbour: [0.60, 0.72, 0.66], coast: [0.58, 0.80, 0.52],
+  forest: [0.50, 0.78, 0.40], mountain: [0.82, 0.79, 0.74], desert: [0.94, 0.66, 0.44],
+  airport: [0.70, 0.70, 0.72]
+};
+function skirtTint(biome: string | undefined, fallback: string): [number, number, number] {
+  return SKIRT_TINT[biome || fallback] || SKIRT_TINT[fallback] || [1, 1, 1];
+}

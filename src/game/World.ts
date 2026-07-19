@@ -189,6 +189,93 @@ export class TrackBuilder {
  * hairpins and esses (no more featureless ovals).
  * ==========================================================================*/
 export const TRACKS: Record<string, TrackDefinition> = {
+  highland: {
+    id: 'highland', name: 'Highland Run', theme: 'mountain',
+    description: 'THE flagship. An 8 km mega circuit that leaves downtown, climbs sweepers through Forest Valley to a 90 m mountain summit, threads a ridge esses complex, rifles down a long coastal Highway Straight, kicks loose through a Dirt Rally chicane and a tight Canyon Run, sweeps the sea-level Industrial Port and climbs one last time to the Hilltop Viewpoint before plunging back to the line. Eight regions, 18 corners, every corner type — one lap.',
+    width: 15, isClosed: true, groundColor: '#38432f', roadColor: '#33333b',
+    // Biome bands by arc-length fraction — the eight regions of Highland Run.
+    // Scenery, per-node ground tint and (on the rally band) the physics surface
+    // all switch together as the loop passes through each region.
+    biomes: [
+      { until: 0.10, theme: 'city' },              // Downtown  (start/finish + tight 90 left)
+      { until: 0.19, theme: 'forest' },            // Forest Valley (climbing sweepers)
+      { until: 0.40, theme: 'mountain' },          // Mountain Pass + ridge (summit ~90 m)
+      { until: 0.56, theme: 'coast' },             // Highway Straight (long, descending, top speed)
+      { until: 0.66, theme: 'desert', dirt: true },// Dirt Rally (loose surface + chicane)
+      { until: 0.74, theme: 'desert' },            // Canyon Run (tight red-rock technical)
+      { until: 0.82, theme: 'harbour' },           // Industrial Port (sea level, wide, cranes)
+      { until: 0.93, theme: 'mountain' },          // Hilltop Viewpoint (climb + tight final)
+      { until: 1.01, theme: 'city' },              // Downtown return to the line
+    ],
+    points: [
+      // DOWNTOWN (city): long start straight + a tight ~90 left (flat)
+      new THREE.Vector3(560, 0, -10),   // 0  START/FINISH
+      new THREE.Vector3(830, 0, -8),    // 1  straight through the line
+      new THREE.Vector3(1010, 1, 2),    // 2  approach / brake
+      new THREE.Vector3(1086, 3, 46),   // 3  turn-in
+      new THREE.Vector3(1104, 6, 96),   // 4  apex-in
+      new THREE.Vector3(1064, 9, 132),  // 5  apex (V)
+      new THREE.Vector3(1006, 12, 150), // 6  exit
+      // FOREST VALLEY (forest): climbing sweepers + a medium left
+      new THREE.Vector3(1000, 20, 340), // 7
+      new THREE.Vector3(1060, 32, 520), // 8  sweeper right
+      new THREE.Vector3(986, 44, 650),  // 9  medium left
+      new THREE.Vector3(1016, 54, 748), // 10
+      new THREE.Vector3(1084, 62, 838), // 11 climbing right
+      // MOUNTAIN PASS (mountain): tight climbing left + summit
+      new THREE.Vector3(1240, 68, 904), // 12 climb east
+      new THREE.Vector3(1402, 72, 940), // 13 approach
+      new THREE.Vector3(1482, 75, 978), // 14 turn-in
+      new THREE.Vector3(1508, 80, 1030),// 15 apex-in
+      new THREE.Vector3(1470, 85, 1074),// 16 apex (V)
+      new THREE.Vector3(1398, 89, 1092),// 17
+      new THREE.Vector3(1310, 90, 1104),// 18 SUMMIT (top ~90 m)
+      // RIDGE + descent (fast esses)
+      new THREE.Vector3(1196, 88, 1150),// 19
+      new THREE.Vector3(1104, 85, 1258),// 20 ridge ess
+      new THREE.Vector3(1180, 80, 1360),// 21 ess-back
+      new THREE.Vector3(1092, 73, 1462),// 22 ridge
+      new THREE.Vector3(900, 67, 1502), // 23
+      new THREE.Vector3(724, 59, 1440), // 24 descending sweep
+      // HIGHWAY STRAIGHT (coast): long, descending, top speed
+      new THREE.Vector3(560, 54, 1430), // 25 highway begins
+      new THREE.Vector3(200, 48, 1446), // 26 long straight
+      new THREE.Vector3(-160, 44, 1416),// 27
+      new THREE.Vector3(-430, 40, 1360),// 28 highway ends
+      // DIRT RALLY (desert dirt): bumpy + sharp chicane
+      new THREE.Vector3(-606, 35, 1236),// 29
+      new THREE.Vector3(-700, 31, 1092),// 30
+      new THREE.Vector3(-666, 28, 940), // 31 chicane R
+      new THREE.Vector3(-576, 29, 850), // 32
+      new THREE.Vector3(-648, 25, 742), // 33 chicane L
+      new THREE.Vector3(-724, 21, 636), // 34
+      // CANYON RUN (desert): tight technical, descending
+      new THREE.Vector3(-812, 17, 502), // 35
+      new THREE.Vector3(-848, 13, 408), // 36 tight left
+      new THREE.Vector3(-812, 11, 336), // 37 apex
+      new THREE.Vector3(-706, 10, 300), // 38 tight right
+      new THREE.Vector3(-712, 8, 176),  // 39 exit
+      // INDUSTRIAL PORT (harbour): sea level, wide sweepers
+      new THREE.Vector3(-560, 5, 44),   // 40
+      new THREE.Vector3(-360, 2, -40),  // 41
+      new THREE.Vector3(-150, 0, -62),  // 42
+      // HILLTOP VIEWPOINT (mountain): climb + tight final + plunge
+      new THREE.Vector3(70, 6, -40),    // 43 approach
+      new THREE.Vector3(214, 18, 6),    // 44 climb
+      new THREE.Vector3(300, 30, 92),   // 45
+      new THREE.Vector3(336, 38, 186),  // 46
+      new THREE.Vector3(340, 40, 214),  // 47 HILLTOP overlook (peak ~40 m)
+      new THREE.Vector3(316, 38, 258),  // 48 tight final in
+      new THREE.Vector3(258, 33, 286),  // 49
+      new THREE.Vector3(188, 26, 286),  // 50 apex
+      new THREE.Vector3(150, 21, 250),  // 51 V-tighten
+      new THREE.Vector3(96, 11, 180),   // 52 plunge
+      new THREE.Vector3(92, 3, 80),     // 53 descend toward downtown
+      new THREE.Vector3(200, 0, -10),   // 54 merge onto start straight
+      new THREE.Vector3(410, 0, -10),   // 55 into start/finish
+    ],
+    idealLine: [], length: 0
+  },
   circuit: {
     id: 'circuit', name: 'Harbour GP Circuit', theme: 'harbour',
     description: 'Seaside GP track: long pit straight, fast T1 sweeper, dock chicane, a proper hairpin and a rhythm section of esses.',
@@ -333,7 +420,7 @@ export const TRACKS: Record<string, TrackDefinition> = {
   },
   grandtour: {
     id: 'grandtour', name: 'Grand Tour Megacircuit', theme: 'mountain',
-    description: 'THE flagship. A colossal 6.5 km grand tour that leaves downtown, climbs through pine forest to a 55 m alpine summit, threads a ridge-top esses complex, plunges into a loose desert dirt descent, sweeps a grassy hillside and rifles back down a long straight to the line. City, forest, mountain and dirt — every kind of corner, one lap.',
+    description: 'A colossal 6.5 km grand tour that leaves downtown, climbs through pine forest to a 55 m alpine summit, threads a ridge-top esses complex, plunges into a loose desert dirt descent, sweeps a grassy hillside and rifles back down a long straight to the line. City, forest, mountain and dirt — every kind of corner, one lap.',
     width: 14, isClosed: true, groundColor: '#3a4436', roadColor: '#34343c',
     // Biomes by arc-length fraction: downtown start -> pine forest climb ->
     // alpine mountain ridge -> forest descent -> desert DIRT section -> grassy
