@@ -441,26 +441,23 @@ export function updateVehicle(
   // ---- 4. STEERING ----------------------------------------------------------
   const speedMs = Math.abs(state.vx);
   const speedKmh = speedMs * 3.6;
-  const maxSteer = 0.80 * res.maxSteerMult;
-  // Arcade sensitivity: a bit more base lock and noticeably more lock retained
-  // at speed so fast/heavy cars stop feeling numb. Deliberately moderate — the
-  // sharper turn-in feel comes mostly from the higher steer RATE below, which
-  // makes the wheel reach its angle faster WITHOUT handing the rear more
-  // rotation authority (raising the lock/assist ceilings too far made the
-  // balanced RWD cars snap-oversteer). Floor 0.65->0.74, rolloff 240->270.
-  const speedFactor = Math.max(0.74, 1 / (1 + speedKmh / 270));
+  // UNIFORM steering sensitivity: base lock and steer rate are the same for
+  // every car and every attachment (no maxSteerMult / steerRateMult), then
+  // dialled up hard for a much sharper, more eager response. Attachments still
+  // change grip/power/drift character — just not the raw steering feel.
+  const maxSteer = 0.82;
+  // Retain far more lock at speed (floor 0.74 -> 0.86) so the front bites at
+  // every velocity, not just in town.
+  const speedFactor = Math.max(0.86, 1 / (1 + speedKmh / 270));
   const steerTarget = inputs.steering * maxSteer * speedFactor + state.steerPull;
 
-  // Direction-aware steering rate: quick counter-steer, quick return-to-centre.
-  // Bumped 40/46/50 -> 46/52/56: the wheel reaches its commanded angle faster,
-  // which is the "sharper, more responsive" feel players want — and unlike
-  // raising the lock/assist ceilings it does NOT let the car rotate past the
-  // point the stability assist can catch, so the balanced RWD cars stay planted.
+  // Near-instant wheel: the commanded angle is reached in ~1 frame, uniform for
+  // all cars, so steering feels immediate and direct.
   const err = steerTarget - state.steerAngle;
-  let steerRate = 46;
-  if (Math.abs(inputs.steering) < 0.05) steerRate = 52;                 // release
-  else if (Math.sign(err) !== Math.sign(state.steerAngle || err)) steerRate = 56; // counter-steer
-  steerRate *= res.steerRateMult;
+  let steerRate = 88;
+  if (Math.abs(inputs.steering) < 0.05) steerRate = 94;                 // release
+  else if (Math.sign(err) !== Math.sign(state.steerAngle || err)) steerRate = 98; // counter-steer
+  // (no res.steerRateMult — steering rate is uniform regardless of attachment)
   state.steerAngle += err * Math.min(1, dt * steerRate);
 
   // Steering-limit assist (the Forza trick): cap the ACTUAL wheel angle so the
@@ -478,7 +475,7 @@ export function updateVehicle(
     // curve so the front actually bites when you steer under throttle — the car
     // turns in willingly instead of feeling numb — while still tracking betaF so
     // it can't snap into a spin.
-    const slipCap = Math.max(0.38, 0.70 - speedKmh * 0.0009)
+    const slipCap = Math.max(0.58, 1.05 - speedKmh * 0.0009) // much wider band -> the front points harder and turns in sharply
       + (1 - Math.min(1, res.assistMult)) * 0.5
       + (inputs.handbrake ? 0.42 : 0);
     delta = Math.max(betaF - slipCap, Math.min(betaF + slipCap, delta));
@@ -628,16 +625,21 @@ export function updateVehicle(
   // to the wheel more alike (uniform feel) without touching real grip (±~3%).
   const REF_GRIP = 0.89; // ~fleet-average baseGrip
   const gripUnif = Math.pow(REF_GRIP / spec.baseGrip, 0.4);
-  const latLimit = ((muFront + muRearEff) * 0.5 * gripUnif * g) / Math.max(3, speedMs) * 1.18;
+  // Yaw ceiling raised 1.18 -> 1.70 so the car is allowed to rotate a lot more
+  // eagerly (paired with the much stronger assist below, which keeps that extra
+  // rotation catchable). This is grip-limited at high speed — the tyres cap how
+  // fast a car can physically rotate — so it lifts low/mid-speed cornering most.
+  const latLimit = ((muFront + muRearEff) * 0.5 * gripUnif * g) / Math.max(3, speedMs) * 1.70;
   const kinYaw = Math.max(-latLimit, Math.min(latLimit, kinYawRaw));
-  // Stronger base pull, and a HIGH floor (0.88, was 0.68) so the assist barely
-  // fades mid-slide — the tail recovers toward neutral steer instead of snapping
-  // into a bigger and bigger drift. This higher floor is what makes the more
-  // eager latLimit (1.18) safe: together they are more responsive yet spin about
-  // half as often as before. Handbrake still cuts the assist hard (x0.26) and
-  // drift-oriented parts lower assistMult, so deliberate slides live on.
-  const assistStrength = 4.0 * res.assistMult * (handbrake ? 0.26 : 1) * Math.max(0.88, 1 - Math.abs(slipRear) * 0.5);
-  state.yawRate += (kinYaw - state.yawRate) * Math.min(0.5, assistStrength * dt);
+  // Assist strengthened 4.0 -> 8.0, per-frame cap 0.5 -> 1.0, floor 0.68 -> 0.95:
+  // the car snaps to its commanded cornering attitude about twice as fast, which
+  // is what makes the raised sensitivity (wider slipCap + 1.70 latLimit) feel
+  // immediate — and because the SAME assist pulls the tail back just as fast, the
+  // much more eager rotation stays catchable rather than running away into a
+  // spin. The high floor keeps it from fading mid-slide. Handbrake still cuts it
+  // hard (x0.26) and drift-oriented parts lower assistMult, so slides live on.
+  const assistStrength = 8.0 * res.assistMult * (handbrake ? 0.26 : 1) * Math.max(0.95, 1 - Math.abs(slipRear) * 0.5);
+  state.yawRate += (kinYaw - state.yawRate) * Math.min(1.0, assistStrength * dt);
 
   // Low-speed stabilisation.
   if (speedMs < 2.2) {
@@ -645,11 +647,11 @@ export function updateVehicle(
     state.vz *= 1 - k * 0.35;
     state.yawRate *= 1 - k * 0.5;
   }
-  // Drift reduced a further 15%: lateral slide velocity 16->13.6 m/s and peak
-  // rotation 2.0->1.75 rad/s (~100°/s). Slides are shorter and calmer still,
-  // while deliberate handbrake/drift-part slides remain possible.
+  // Peak rotation clamp raised 1.75 -> 2.0 rad/s (~115°/s) to give the more
+  // sensitive steering headroom to actually rotate the car harder into and
+  // through tight corners instead of clipping at the old ceiling.
   state.vz = Math.max(-13.6, Math.min(13.6, state.vz));
-  state.yawRate = Math.max(-1.75, Math.min(1.75, state.yawRate));
+  state.yawRate = Math.max(-2.0, Math.min(2.0, state.yawRate));
 
   const s = Math.sin(state.yaw), c = Math.cos(state.yaw);
   const worldVX = state.vx * s + state.vz * c;
