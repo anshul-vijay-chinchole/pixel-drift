@@ -60,7 +60,10 @@ export interface CarLoadout {
 }
 
 export const DEFAULT_LOADOUT: CarLoadout = {
-  color: '#e63946', neonColor: 'none', plate: 'RETRO',
+  // color '' means "unpainted" -> getLoadout resolves it to the car's signature
+  // colour. Using an empty sentinel (not a real hex) means a player who picks any
+  // real colour, including the old legacy red, keeps exactly what they chose.
+  color: '', neonColor: 'none', plate: 'PIXEL',
   engine: 'stock', induction: 'na', tires: 'street', suspension: 'sport',
   diff: 'lsd', gearbox: 'sequential', brakes: 'stock', weight: 'stock', aero: 'none'
 };
@@ -293,6 +296,26 @@ const CAR_DATABASE: CarDefinition[] = [
   }
 ];
 
+// Signature paint per car, sampled to match each car's selection sprite so the
+// 3D car you drive is the SAME colour as the one you picked (previously every
+// un-painted car fell back to DEFAULT_LOADOUT's red, so e.g. the blue GT-R
+// sprite drove as a red car). Used as the loadout colour default; a paint the
+// player picks in the garage still overrides it.
+export const CAR_COLORS: Record<string, string> = {
+  ae86: '#e8e8ea', mx5: '#d42030', ek9: '#eef0f0', gti: '#3a3d42',
+  foxbody: '#2c3e54', e30: '#eef0f0', evo: '#cc2b28', wrx: '#1a53a8',
+  gtr34: '#2456a8', nsx: '#e6e6e6', supra: '#e8641a', f40: '#d4241d',
+  cgt: '#c8ccce', sv12: '#7ac82e',
+};
+
+// The generic fallback red that un-painted cars used before per-car colours
+// existed. It is NOT in the garage palette, so any garage entry still holding
+// this exact hex was auto-created (never a deliberate paint choice) and is
+// safely treated as "unpainted" so old saves adopt the car's signature colour.
+const LEGACY_DEFAULT_COLOR = '#e63946';
+
+export const carColor = (carId: string): string => CAR_COLORS[carId] ?? LEGACY_DEFAULT_COLOR;
+
 const SAVE_KEY = 'pixel_drift_v1';
 
 const freshStats = (): PlayerStats => ({
@@ -309,8 +332,15 @@ const freshStats = (): PlayerStats => ({
 // Always merge onto DEFAULT_LOADOUT so a partial or older-schema saved loadout
 // (missing a slot added later, e.g. aero/neonColor) can never leave undefined
 // fields — those would build white cars, phantom wings, or wrong gearbox modes.
-export const getLoadout = (stats: PlayerStats, carId: string): CarLoadout =>
-  ({ ...DEFAULT_LOADOUT, ...(stats.garage[carId] || {}) });
+export const getLoadout = (stats: PlayerStats, carId: string): CarLoadout => {
+  const merged = { ...DEFAULT_LOADOUT, ...(stats.garage[carId] || {}) };
+  // Only a falsy (unpainted) colour falls back to the car's signature colour, so
+  // the driven car matches its selection sprite. Legacy generic-red saves are
+  // normalised to '' once at load (see GameProvider), so a deliberately-picked
+  // colour — even #e63946 — is always preserved here.
+  if (!merged.color) merged.color = carColor(carId);
+  return merged;
+};
 
 const GameContext = createContext<GameContextType | undefined>(undefined);
 
@@ -318,7 +348,17 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [stats, setStats] = useState<PlayerStats>(() => {
     try {
       const saved = localStorage.getItem(SAVE_KEY);
-      if (saved) return { ...freshStats(), ...JSON.parse(saved) };
+      if (saved) {
+        const loaded: PlayerStats = { ...freshStats(), ...JSON.parse(saved) };
+        // One-time migration: the legacy generic red was an auto-default, never a
+        // deliberate paint choice, so clear it to '' (unpainted). getLoadout then
+        // resolves it to the car's signature colour. Idempotent on later loads,
+        // and a colour the player picks from now on — even #e63946 — is kept.
+        for (const lo of Object.values(loaded.garage || {})) {
+          if (lo && lo.color === LEGACY_DEFAULT_COLOR) lo.color = '';
+        }
+        return loaded;
+      }
     } catch (e) { console.error('Save load failed:', e); }
     return freshStats();
   });
@@ -341,7 +381,7 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setStats(prev => ({
       ...prev,
       activeCarId: carId,
-      garage: prev.garage[carId] ? prev.garage : { ...prev.garage, [carId]: { ...DEFAULT_LOADOUT } }
+      garage: prev.garage[carId] ? prev.garage : { ...prev.garage, [carId]: { ...DEFAULT_LOADOUT, color: carColor(carId) } }
     }));
   };
 

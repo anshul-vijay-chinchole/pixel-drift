@@ -200,7 +200,10 @@ export class AIEngine {
       * ((ai.loadout.tires === 'street' || ai.loadout.tires === 'drift') ? 0.93 : 1)
       * boostSp;
     const capMs = (40 + ai.skill * 44) * boostSp; // absolute cap (boosted top speed)
-    const look = (idx + 3) % n;
+    // On sprint (open) tracks node 0 is the START, so wrapping the lookahead
+    // past the finish would aim the leading AI back toward the start; clamp to
+    // the last node instead. Closed tracks wrap as before (node 0 is ahead).
+    const look = isClosed ? (idx + 3) % n : Math.min(n - 1, idx + 3);
     ai.targetSpeed = Math.min(capMs, ai.speedProfile[look] * paceMult);
     // Off the tarmac? Back right off and gather it up so they rejoin the ribbon
     // instead of ploughing on across the grass at racing speed.
@@ -212,7 +215,7 @@ export class AIEngine {
     // speed, which cut apexes and carried the car wide. Aim closer so the line
     // actually follows the road.
     const laOff = Math.min(13, Math.floor(4 + speedMs * 0.35));
-    const targetIdx = (idx + laOff) % n;
+    const targetIdx = isClosed ? (idx + laOff) % n : Math.min(n - 1, idx + laOff);
     const tnode = trackPoints[targetIdx];
 
     // Apex-seeking: bias toward the inside of the upcoming corner.
@@ -282,10 +285,14 @@ export class AIEngine {
     }
     // Baseline sloppiness, independent of the player, scaled hard by (1-skill)^2
     // so LOW tiers genuinely make errors (and are beatable) while high tiers are
-    // near-flawless: novice ~1 slip / 7 s, legend effectively never.
+    // near-flawless. The old 0.14 coefficient gave Novice only ~1 slip / 2-4 min
+    // — so the "occasional slips" tiers ran essentially flawless and the bottom
+    // of the ladder was unbeatable for new players. 1.6 restores the intended
+    // rate (~1 slip / 15 s at Novice, ~1 / 30 s at Rookie) while the (1-skill)^2
+    // term keeps Pro+ (and skill>=1 tiers) at effectively zero.
     if (ai.mistakeTimer <= 0 && ai.mistakeType === 'none') {
       const sloppy = Math.max(0, 1 - ai.skill); // >=0 so impossible (skill>1) never errs
-      if (Math.random() < sloppy * sloppy * 0.14 * dt) {
+      if (Math.random() < sloppy * sloppy * 1.6 * dt) {
         ai.mistakeTimer = 0.5 + Math.random() * 1.0;
         ai.mistakeType = Math.random() > 0.6 ? 'lockup' : 'wide';
       }

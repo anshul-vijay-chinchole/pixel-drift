@@ -54,6 +54,7 @@ export const App: React.FC = () => {
   const idxRef = useRef(0);
   const needSectorRef = useRef(1);
   const lastAiIdx = useRef<Record<string, number>>({});
+  const aiPassedHalf = useRef<Record<string, boolean>>({}); // per-AI half-lap guard (mirrors passedHalfRef)
   const posRef = useRef(1);
   const camModeRef = useRef<CameraMode>('chase');
   const hudTick = useRef(0);
@@ -117,6 +118,7 @@ export const App: React.FC = () => {
   useEffect(() => {
     if (activeRace) {
       setScreen('race');
+      setPlayerHUD(null); // clear any prior race's HUD during the 60ms pre-launch gap
       sound.init();
       // Defer until the canvas container is laid out & visible. setTimeout is
       // used (not rAF) so the race still initialises in a background tab.
@@ -165,7 +167,8 @@ export const App: React.FC = () => {
     oppsRef.current = oppCount > 0
       ? AIEngine.spawnOpponents(oppCount, tp, cars, config.difficulty, trackDef.isClosed, slots.slice(1), carDef.specs.power) : [];
     lastAiIdx.current = {};
-    oppsRef.current.forEach(o => { lastAiIdx.current[o.id] = o.currentTrackIndex; });
+    aiPassedHalf.current = {};
+    oppsRef.current.forEach(o => { lastAiIdx.current[o.id] = o.currentTrackIndex; aiPassedHalf.current[o.id] = true; });
 
     trafficRef.current = config.trackId === 'highway' ? TrafficEngine.spawnTraffic(12, tp) : [];
 
@@ -187,6 +190,7 @@ export const App: React.FC = () => {
     setLap(1); setElapsed(0); setBest(Infinity); setPos(1); setCountdown(3);
     setSummary(null);
     setStandings([]);
+    setPlayerHUD(null); // hide last race's HUD until the first fresh tick populates it
     replayRef.current.startRecording();
     sound.setMute(mutedRef.current); // fix: audio stayed muted after quitting a race
 
@@ -291,10 +295,18 @@ export const App: React.FC = () => {
       if (racing) {
         AIEngine.updateAI(o, dt, tp, p, oppsRef.current, config.difficulty, isWet, config.trackId, trackDef.isClosed, terrRef.current);
         const li = lastAiIdx.current[o.id] ?? o.currentTrackIndex;
-        // Same forward-crossing detection as the player, so laps/progress align.
-        if (trackDef.isClosed && li > tp.length * 0.75 && o.currentTrackIndex < tp.length * 0.25) o.lap++;
+        const aN = tp.length;
+        // Same forward-crossing + half-lap guard as the player, so a wrong-way or
+        // stuck-recovery jitter across the start line can't double-count an AI lap.
+        if (trackDef.isClosed) {
+          if (o.currentTrackIndex > aN * 0.45 && o.currentTrackIndex < aN * 0.55) aiPassedHalf.current[o.id] = true;
+          if (aiPassedHalf.current[o.id] && li > aN * 0.75 && o.currentTrackIndex < aN * 0.25) {
+            aiPassedHalf.current[o.id] = false;
+            o.lap++;
+          }
+        }
         lastAiIdx.current[o.id] = o.currentTrackIndex;
-        o.progress = trackDef.isClosed ? o.lap * tp.length + o.currentTrackIndex : o.currentTrackIndex;
+        o.progress = trackDef.isClosed ? o.lap * aN + o.currentTrackIndex : o.currentTrackIndex;
       }
     });
 
@@ -319,22 +331,29 @@ export const App: React.FC = () => {
     if (trafficRef.current.length) {
       if (racing) {
         TrafficEngine.updateTraffic(trafficRef.current, dt, tp, p.x, p.z);
-        // Solid contact: bump the player off any traffic car/truck they hit.
-        for (const tcar of trafficRef.current) {
-          const dx = p.x - tcar.x, dz = p.z - tcar.z;
-          const d = Math.hypot(dx, dz);
-          const R = tcar.kind === 'truck' ? 3.2 : 2.6;
-          if (d < R && d > 1e-3) {
-            const nx = dx / d, nz = dz / d;
-            p.x += nx * (R - d); p.z += nz * (R - d);
-            // Normal closing speed only (same reasoning as the wall fix above).
-            const ws = Math.sin(p.yaw), wc = Math.cos(p.yaw);
-            const wvx = p.vx * ws + p.vz * wc, wvz = p.vx * wc - p.vz * ws;
-            const impact = Math.max(0, -(wvx * nx + wvz * nz));
-            resolveCollision(p, nx, nz, impact, 0.3);
-            if (impact > 8) { gfx.triggerBackfirePop(); sound.triggerBackfire(); }
+        // Solid contact against traffic — applied to the player AND every
+        // opponent. Previously only the player collided, so AI drove straight
+        // through highway traffic with no slowdown, a physically-inconsistent
+        // free advantage on the one track that has traffic.
+        const collideWithTraffic = (v: VehicleState, isPlayer: boolean) => {
+          for (const tcar of trafficRef.current) {
+            const dx = v.x - tcar.x, dz = v.z - tcar.z;
+            const d = Math.hypot(dx, dz);
+            const R = tcar.kind === 'truck' ? 3.2 : 2.6;
+            if (d < R && d > 1e-3) {
+              const nx = dx / d, nz = dz / d;
+              v.x += nx * (R - d); v.z += nz * (R - d);
+              // Normal closing speed only (same reasoning as the wall fix above).
+              const ws = Math.sin(v.yaw), wc = Math.cos(v.yaw);
+              const wvx = v.vx * ws + v.vz * wc, wvz = v.vx * wc - v.vz * ws;
+              const impact = Math.max(0, -(wvx * nx + wvz * nz));
+              resolveCollision(v, nx, nz, impact, 0.3);
+              if (isPlayer && impact > 8) { gfx.triggerBackfirePop(); sound.triggerBackfire(); }
+            }
           }
-        }
+        };
+        collideWithTraffic(p, true);
+        oppsRef.current.forEach(o => collideWithTraffic(o.state, false));
       }
       trafficRef.current.forEach(t => gfx.updateAICar(t.id, t.x, t.y, t.z, t.yaw, t.color));
     }
@@ -387,7 +406,14 @@ export const App: React.FC = () => {
           setLap(lapRef.current);
           if (lapRef.current > 1) showToast(`LAP ${lapRef.current}/${config.laps}`);
         }
-      } else if (idx >= N - 3) { finishRace(); return; }
+      } else if (idx >= N - 3) {
+        // Recompute this frame's place before finishing (mirrors the closed-track
+        // branch) so a photo-finish on a sprint reports the correct place/payout,
+        // not last frame's stale standings.
+        let pl = 1; oppsRef.current.forEach(o => { if (o.progress > idx) pl++; });
+        posRef.current = pl;
+        finishRace(); return;
+      }
     }
 
     // ---- position + standings ---- (player and AI share the lap*N+idx baseline)
@@ -499,6 +525,7 @@ export const App: React.FC = () => {
     const cfg = cfgRef.current;
     if (!cfg) return;
     setPhaseBoth('finished'); // stops old loop
+    setPlayerHUD(null); // hide the old race's HUD during the 60ms restart gap
     window.setTimeout(() => launchRace(cfg), 60);
   };
 
@@ -563,7 +590,7 @@ export const App: React.FC = () => {
             <div className="pause-actions">
               <button className="pause-btn" onClick={togglePause}><Play size={18} /> RESUME</button>
               <button className="pause-btn" onClick={doRestart}><RotateCcw size={18} /> RESTART RACE</button>
-              <button className="pause-btn" onClick={() => { respawn(); togglePause(); }}><MapPin size={18} /> RESPAWN ON TRACK</button>
+              <button className="pause-btn" onClick={() => { togglePause(); respawn(); }}><MapPin size={18} /> RESPAWN ON TRACK</button>
               <button className="pause-btn danger" onClick={doExit}><LogOut size={18} /> QUIT TO MENU</button>
             </div>
             <div className="controls-ref">

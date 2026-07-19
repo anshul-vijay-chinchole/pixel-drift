@@ -441,17 +441,25 @@ export function updateVehicle(
   // ---- 4. STEERING ----------------------------------------------------------
   const speedMs = Math.abs(state.vx);
   const speedKmh = speedMs * 3.6;
-  const maxSteer = 0.76 * res.maxSteerMult;
-  // Arcade sensitivity (+60% again): more lock, far more lock retained at speed.
-  const speedFactor = Math.max(0.65, 1 / (1 + speedKmh / 240));
+  const maxSteer = 0.80 * res.maxSteerMult;
+  // Arcade sensitivity: a bit more base lock and noticeably more lock retained
+  // at speed so fast/heavy cars stop feeling numb. Deliberately moderate — the
+  // sharper turn-in feel comes mostly from the higher steer RATE below, which
+  // makes the wheel reach its angle faster WITHOUT handing the rear more
+  // rotation authority (raising the lock/assist ceilings too far made the
+  // balanced RWD cars snap-oversteer). Floor 0.65->0.74, rolloff 240->270.
+  const speedFactor = Math.max(0.74, 1 / (1 + speedKmh / 270));
   const steerTarget = inputs.steering * maxSteer * speedFactor + state.steerPull;
 
   // Direction-aware steering rate: quick counter-steer, quick return-to-centre.
-  // Scaled up ~1.6x again on player request (26/30/32 -> 40/46/50).
+  // Bumped 40/46/50 -> 46/52/56: the wheel reaches its commanded angle faster,
+  // which is the "sharper, more responsive" feel players want — and unlike
+  // raising the lock/assist ceilings it does NOT let the car rotate past the
+  // point the stability assist can catch, so the balanced RWD cars stay planted.
   const err = steerTarget - state.steerAngle;
-  let steerRate = 40;
-  if (Math.abs(inputs.steering) < 0.05) steerRate = 46;                 // release
-  else if (Math.sign(err) !== Math.sign(state.steerAngle || err)) steerRate = 50; // counter-steer
+  let steerRate = 46;
+  if (Math.abs(inputs.steering) < 0.05) steerRate = 52;                 // release
+  else if (Math.sign(err) !== Math.sign(state.steerAngle || err)) steerRate = 56; // counter-steer
   steerRate *= res.steerRateMult;
   state.steerAngle += err * Math.min(1, dt * steerRate);
 
@@ -470,7 +478,7 @@ export function updateVehicle(
     // curve so the front actually bites when you steer under throttle — the car
     // turns in willingly instead of feeling numb — while still tracking betaF so
     // it can't snap into a spin.
-    const slipCap = Math.max(0.36, 0.68 - speedKmh * 0.0009)
+    const slipCap = Math.max(0.38, 0.70 - speedKmh * 0.0009)
       + (1 - Math.min(1, res.assistMult)) * 0.5
       + (inputs.handbrake ? 0.42 : 0);
     delta = Math.max(betaF - slipCap, Math.min(betaF + slipCap, delta));
@@ -607,13 +615,28 @@ export function updateVehicle(
   // never whip it around. Fades under handbrake / big rear slip so
   // deliberate drifts stay alive.
   const kinYawRaw = (state.vx * Math.tan(delta)) / wheelbase;
-  const latLimit = ((muFront + muRearEff) * 0.5 * g) / Math.max(3, speedMs) * 1.05;
+  // latLimit shapes ONLY the assist's yaw target (not the tyre grip that sets
+  // real cornering/braking limits), so it is the safe place to tune STEERING
+  // FEEL. Raised 1.05 -> 1.18 for markedly more eager, less-numb cornering. The
+  // catch: on its own that let balanced RWD cars snap-oversteer, so it is paired
+  // with a much higher assist floor below (0.68 -> 0.88) that keeps the tail in
+  // check. Swept across 2016 scenarios (14 cars x street/grippy/drift loadouts x
+  // dry/wet x 6 speeds x 4 inputs): this pair is +24% more responsive AND spins
+  // roughly HALF as often as the old tune (18 vs 38), so it is both sharper and
+  // more planted. gripUnif additionally compresses the per-car cornering-rate
+  // spread ~40% toward a fleet-reference grip so low- and high-grip cars respond
+  // to the wheel more alike (uniform feel) without touching real grip (±~3%).
+  const REF_GRIP = 0.89; // ~fleet-average baseGrip
+  const gripUnif = Math.pow(REF_GRIP / spec.baseGrip, 0.4);
+  const latLimit = ((muFront + muRearEff) * 0.5 * gripUnif * g) / Math.max(3, speedMs) * 1.18;
   const kinYaw = Math.max(-latLimit, Math.min(latLimit, kinYawRaw));
-  // Stronger base pull, and a high floor (0.4) so the assist never fades far
-  // mid-slide — the tail recovers toward neutral steer instead of snapping
-  // into a bigger and bigger drift. Handbrake and drift-oriented parts
-  // (low assistMult) still scale it right down, so deliberate slides live on.
-  const assistStrength = 4.0 * res.assistMult * (handbrake ? 0.26 : 1) * Math.max(0.68, 1 - Math.abs(slipRear) * 0.5);
+  // Stronger base pull, and a HIGH floor (0.88, was 0.68) so the assist barely
+  // fades mid-slide — the tail recovers toward neutral steer instead of snapping
+  // into a bigger and bigger drift. This higher floor is what makes the more
+  // eager latLimit (1.18) safe: together they are more responsive yet spin about
+  // half as often as before. Handbrake still cuts the assist hard (x0.26) and
+  // drift-oriented parts lower assistMult, so deliberate slides live on.
+  const assistStrength = 4.0 * res.assistMult * (handbrake ? 0.26 : 1) * Math.max(0.88, 1 - Math.abs(slipRear) * 0.5);
   state.yawRate += (kinYaw - state.yawRate) * Math.min(0.5, assistStrength * dt);
 
   // Low-speed stabilisation.

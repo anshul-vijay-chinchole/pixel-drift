@@ -995,7 +995,8 @@ export class GameGraphics {
 
   public dispose() {
     window.removeEventListener('resize', this.onResize);
-    this.aiCars.forEach(a => this.scene.remove(a.group));
+    // Keep AI car groups in the scene graph so the disposal traverse below frees
+    // their geometries/materials/textures too; scene.clear() removes them after.
     this.aiCars.clear();
     // Free every geometry/material in the graph (dispose is idempotent, so
     // shared geo/materials being hit more than once is fine), then drop the

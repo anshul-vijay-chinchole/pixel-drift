@@ -267,7 +267,8 @@ export const TRACKS: Record<string, TrackDefinition> = {
       new THREE.Vector3(60, 28, 380), new THREE.Vector3(120, 26, 450), new THREE.Vector3(20, 24, 480),   // summit esses complex
       new THREE.Vector3(-120, 24, 460), new THREE.Vector3(-240, 20, 400),                                // top-left sweep
       new THREE.Vector3(-340, 14, 300), new THREE.Vector3(-390, 8, 180),                                 // plunging far-side descent
-      new THREE.Vector3(-360, 4, 70), new THREE.Vector3(-410, 2, -20),                                   // brutal stadium hairpin
+      new THREE.Vector3(-370, 5, 80), new THREE.Vector3(-435, 3, 25),                                    // wide entry into the stadium hairpin
+      new THREE.Vector3(-445, 1, -40), new THREE.Vector3(-395, 0, -70),                                  // rounded hairpin apex (R~15 m > 6 m half-width, no edge fold)
       new THREE.Vector3(-330, 0, 0), new THREE.Vector3(-260, 0, 0), new THREE.Vector3(-200, 0, 0)        // long run-in to the straight
     ],
     idealLine: [], length: 0

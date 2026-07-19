@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
-import { useGame, TrackId, WeatherType, RaceConfig, DIFFICULTIES } from '../context/GameContext';
+import { useGame, TrackId, WeatherType, RaceConfig, DIFFICULTIES, getLoadout } from '../context/GameContext';
 import { TRACKS } from '../game/World';
 import { Play, Wrench, Trophy, ChevronRight, Sun, CloudRain, Snowflake, CloudFog, Moon, Star, Gauge } from 'lucide-react';
 
@@ -170,7 +170,7 @@ export const MainMenu: React.FC<MainMenuProps> = ({ onOpenGarage }) => {
                   alt=""
                   onError={e => { e.currentTarget.style.display = 'none'; }}
                 />
-                <div className="car-swatch" style={{ background: (stats.garage[activeCar.id]?.color) || '#e63946' }} />
+                <div className="car-swatch" style={{ background: getLoadout(stats, activeCar.id).color }} />
                 <h2 className="car-name-text">{activeCar.name}</h2>
                 <p className="car-description">{activeCar.description}</p>
 
