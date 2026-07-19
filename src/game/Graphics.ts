@@ -543,6 +543,7 @@ export class GameGraphics {
       }
       const end = trackDef.isClosed ? n : n - 1;
       for (let i = 0; i < end; i++) {
+        if (tp[i].dirt || tp[(i + 1) % n].dirt) continue; // no painted lane lines on the dirt biome
         const a = i * 4, b = ((i + 1) % n) * 4;
         for (const s0 of [0, 2]) {
           lix.push(a + s0, b + s0, a + s0 + 1, a + s0 + 1, b + s0, b + s0 + 1);
@@ -559,6 +560,7 @@ export class GameGraphics {
       dashGeo.rotateX(-Math.PI / 2);
       for (let i = 0; i < n; i += 3) {
         const p = tp[i];
+        if (p.dirt) continue; // no centre dashes on dirt
         const dash = new THREE.Mesh(dashGeo, dashMat);
         dash.position.set(p.pos.x, p.pos.y + 0.08, p.pos.z);
         // lookAt along the full 3D tangent (incl. y) so dashes pitch with the
@@ -570,8 +572,8 @@ export class GameGraphics {
 
     for (let i = 0; i < tp.length; i += 2) {
       const p = tp[i];
-      // Curbs only on corners of tarmac tracks.
-      if (isTarmac && p.curvature > 0.02) {
+      // Curbs only on corners of tarmac tracks — never on the dirt biome.
+      if (isTarmac && p.curvature > 0.02 && !p.dirt) {
         for (const side of [-1, 1]) {
           const hw = p.width / 2 + 0.35;
           const cx = p.pos.x + p.normal.x * side * hw;
@@ -1009,7 +1011,10 @@ export class GameGraphics {
     if (this.camTp.length > 2) {
       this.camHint = TrackBuilder.nearestIndex(camX, camZ, this.camTp, this.camHint, 60);
       const groundAtCam = roadHeightAt(this.camTp, this.camHint, camX, camZ);
-      camY = Math.max(camY, groundAtCam + 2.4);
+      // Clearance is capped to this mode's own height offset so the lift can
+      // never RAISE the camera above where the mode wants it — the low hood cam
+      // (offY 1.15) keeps its bonnet height; only the anti-clip floor applies.
+      camY = Math.max(camY, groundAtCam + Math.min(offY, 2.4));
     }
     if (!this.camInit) { this.camera.position.set(camX, camY, camZ); this.camInit = true; }
     this.camera.position.lerp(new THREE.Vector3(camX, camY, camZ), Math.min(1, dt * lag));
@@ -1018,7 +1023,11 @@ export class GameGraphics {
     this.camera.lookAt(lookTarget);
   }
 
-  public resetCamera() { this.camInit = false; this.camHint = 0; }
+  // Seed the terrain-sampling hint from the car's current node so a mid-lap
+  // camera cycle doesn't leave nearestIndex searching a stale window (which, on
+  // a big elevated track, would sample a far-away node's height and pop the
+  // camera). At race start the grid is near node 0, so the default is fine.
+  public resetCamera(hint = 0) { this.camInit = false; this.camHint = hint; }
 
   public dispose() {
     window.removeEventListener('resize', this.onResize);

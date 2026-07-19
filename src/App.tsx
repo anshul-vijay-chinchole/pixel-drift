@@ -538,7 +538,7 @@ export const App: React.FC = () => {
   };
   const cycleCam = () => {
     const next = CAM_MODES[(CAM_MODES.indexOf(camModeRef.current) + 1) % CAM_MODES.length];
-    camModeRef.current = next; setCamMode(next); gfxRef.current?.resetCamera();
+    camModeRef.current = next; setCamMode(next); gfxRef.current?.resetCamera(idxRef.current);
   };
 
   const fmt = (t: number) => {

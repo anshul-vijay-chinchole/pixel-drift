@@ -362,7 +362,7 @@ export const TRACKS: Record<string, TrackDefinition> = {
       new THREE.Vector3(-243, 7, 675), new THREE.Vector3(-189, 7, 486),                // dirt switchback
       new THREE.Vector3(-324, 5, 338), new THREE.Vector3(-432, 2, 176),                // dirt run to the far corner
       new THREE.Vector3(-486, 0, 27), new THREE.Vector3(-432, 0, -108),                // grassy hillside U-turn
-      new THREE.Vector3(-270, 0, -95), new THREE.Vector3(-351, 0, -27),                // onto the long city back straight
+      new THREE.Vector3(-351, 0, -83), new THREE.Vector3(-270, 0, -58),                // onto the long city back straight (both on the P24->P27 line: no switchback)
       new THREE.Vector3(-81, 0, 0), new THREE.Vector3(189, 0, 14),                     // the ~800 m start straight (grid forms up here)
     ],
     idealLine: [], length: 0
