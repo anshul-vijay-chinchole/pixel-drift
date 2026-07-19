@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useGame, CarLoadout, PART_SLOTS, LoadoutSlotKey, getLoadout, DEFAULT_LOADOUT } from '../context/GameContext';
 import { previewStats } from '../game/Physics';
+import { CarPreview3D } from './CarPreview3D';
 import { ArrowLeft, Save, Palette, Cog, Check, Zap, CircleDot, Waves, GitBranch, Settings2, Disc3, Feather, Wind } from 'lucide-react';
 
 interface GarageProps {
@@ -163,12 +164,9 @@ export const Garage: React.FC<GarageProps> = ({ onClose }) => {
           <div className="garage-grid">
             <div className="styling-panel card-glow">
               <h3>PAINT & GLOW</h3>
-              <img
-                className="car-sprite car-sprite-lg"
-                src={`cars/${carId}.png`}
-                alt=""
-                onError={e => { e.currentTarget.style.display = 'none'; }}
-              />
+              {/* Live 3D preview of the actual car — reflects paint + neon as you
+                  pick them (the flat sprite never changed, so styling looked broken). */}
+              <CarPreview3D carId={carId} loadout={loadout} />
               <div className="styling-group">
                 <label>PAINT</label>
                 <div className="color-palette">

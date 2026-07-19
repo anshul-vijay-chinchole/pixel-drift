@@ -47,7 +47,9 @@ const DEFAULT_PROFILE: CarProfile = { len: 4.4, wid: 1.9, shape: 'coupe', low: f
 export function carProfileFor(id?: string): CarProfile { return (id ? CAR_PROFILES[id] : undefined) || DEFAULT_PROFILE; }
 
 // Factory: build a stylised low-poly car group facing +Z, shaped by profile.
-function buildCarMesh(bodyColor: string, opts: { player?: boolean; custom?: CarLoadout; profile?: CarProfile } = {}): {
+// Exported so the garage can render a live 3D preview of the exact in-game car
+// (paint + neon) as the player customises it.
+export function buildCarMesh(bodyColor: string, opts: { player?: boolean; custom?: CarLoadout; profile?: CarProfile } = {}): {
   group: THREE.Group;
   wheels: THREE.Object3D[];
   brakeLights: THREE.MeshBasicMaterial[];
