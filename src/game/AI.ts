@@ -126,7 +126,10 @@ export class AIEngine {
       // Performance "bonus": higher tiers get faster machinery (more grip+power),
       // so they genuinely pull away — the way you make racing AI hard once their
       // driving is already near-optimal. Novice +6% up to Impossible ~+35%.
-      const perfBoost = Math.min(1.35, 1.06 + Math.max(0, skill - 0.78) * 0.52);
+      // ×1.2 (cap raised to match): rivals run a 20% bigger car-performance edge
+      // across EVERY tier — sqrt(perfBoost) feeds corner speed AND the top-speed
+      // cap, so this is a genuine across-the-board pace gain, not a knob tweak.
+      const perfBoost = Math.min(1.62, (1.06 + Math.max(0, skill - 0.78) * 0.52) * 1.2);
 
       const g = gridSpawn(trackPoints, isClosed, slots[i] ?? (i + 1));
       const state = initVehicleState(carDef);
@@ -146,7 +149,7 @@ export class AIEngine {
         lap: 0, // unified with the player: 0 on the grid, +1 on each line crossing
         progress: g.nodeIdx, // seed so grid standings are correct during the countdown
 
-        lineOffset: (Math.random() - 0.5) * 2.2 * (1.6 - Math.min(1, skill)), // sharper drivers hug the ideal line
+        lineOffset: (Math.random() - 0.5) * 1.76 * (1.6 - Math.min(1, skill)), // sharper drivers hug the ideal line (scatter -20%: rivals drive tighter lines)
         mistakeTimer: 0,
         mistakeType: 'none',
         pressureRating: 0,
@@ -279,7 +282,7 @@ export class AIEngine {
       if (ai.mistakeTimer <= 0) ai.mistakeType = 'none';
     } else if (playerDist < 14 && Math.abs(playerState.vx) > speedMs && playerAhead < 0) {
       ai.pressureRating = Math.min(1, ai.pressureRating + dt * 0.12);
-      if (Math.random() < Math.max(0, 1 - ai.skill) * 0.08 * ai.pressureRating * dt) {
+      if (Math.random() < Math.max(0, 1 - ai.skill) * 0.064 * ai.pressureRating * dt) { // -20%: rivals crack under pressure less
         ai.mistakeTimer = 0.8 + Math.random() * 1.4;
         ai.mistakeType = Math.random() > 0.5 ? 'lockup' : 'wide';
       }
@@ -288,14 +291,12 @@ export class AIEngine {
     }
     // Baseline sloppiness, independent of the player, scaled hard by (1-skill)^2
     // so LOW tiers genuinely make errors (and are beatable) while high tiers are
-    // near-flawless. The old 0.14 coefficient gave Novice only ~1 slip / 2-4 min
-    // — so the "occasional slips" tiers ran essentially flawless and the bottom
-    // of the ladder was unbeatable for new players. 1.6 restores the intended
-    // rate (~1 slip / 15 s at Novice, ~1 / 30 s at Rookie) while the (1-skill)^2
-    // term keeps Pro+ (and skill>=1 tiers) at effectively zero.
+    // near-flawless. 1.28 (was 1.6, -20% for the across-the-board rivals buff)
+    // still gives Novice ~1 slip / 19 s and Rookie ~1 / 40 s, while the
+    // (1-skill)^2 term keeps Pro+ (and skill>=1 tiers) at effectively zero.
     if (ai.mistakeTimer <= 0 && ai.mistakeType === 'none') {
       const sloppy = Math.max(0, 1 - ai.skill); // >=0 so impossible (skill>1) never errs
-      if (Math.random() < sloppy * sloppy * 1.6 * dt) {
+      if (Math.random() < sloppy * sloppy * 1.28 * dt) {
         ai.mistakeTimer = 0.5 + Math.random() * 1.0;
         ai.mistakeType = Math.random() > 0.6 ? 'lockup' : 'wide';
       }
