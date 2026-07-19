@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { VehicleState } from './Physics';
-import { TrackPoint, TrackDefinition, wallMargin, terrainInfo, groundHeight, SKIRT_OFFS } from './World';
+import { TrackPoint, TrackDefinition, wallMargin, terrainInfo, groundHeight, roadHeightAt, SKIRT_OFFS, TrackBuilder } from './World';
 import { CarLoadout } from '../context/GameContext';
 
 export type CameraMode = 'chase' | 'hood' | 'drone';
@@ -236,6 +236,8 @@ export class GameGraphics {
   // (which switches on the road-following "skirt" terrain).
   private backdropY = -0.15;
   private hasRelief = false;
+  private camTp: TrackPoint[] = []; // track points, so the camera can sample terrain and never sink below it
+  private camHint = 0;
 
   // Ground height at `edgeDist` metres beyond the road edge — delegates to the
   // shared World.groundHeight so the mesh, scenery and car all agree.
@@ -397,6 +399,7 @@ export class GameGraphics {
   }
 
   public buildTrackGraphics(trackDef: TrackDefinition, tp: TrackPoint[], weather = 'sunny') {
+    this.camTp = tp; this.camHint = 0;
     this.theme = trackDef;
     if (this.roadMesh) { this.scene.remove(this.roadMesh); this.roadMesh.geometry.dispose(); }
     if (this.groundMesh) { this.scene.remove(this.groundMesh); }
@@ -459,7 +462,7 @@ export class GameGraphics {
     // across the width and v along the arc length so a tarmac/dirt texture tiles
     // down the road at a fixed real-world scale.
     const roadGeo = new THREE.BufferGeometry();
-    const verts: number[] = []; const uvs: number[] = []; const idx: number[] = [];
+    const verts: number[] = []; const uvs: number[] = []; const idx: number[] = []; const cols: number[] = [];
     const tileM = 8; // metres of road per texture repeat
     for (let i = 0; i < tp.length; i++) {
       const p = tp[i]; const hw = p.width / 2;
@@ -467,6 +470,10 @@ export class GameGraphics {
       verts.push(p.pos.x - p.normal.x * hw, p.pos.y + 0.04, p.pos.z - p.normal.z * hw);
       const v = p.dist / tileM, uR = p.width / tileM;
       uvs.push(0, v, uR, v);
+      // Dirt biome sections get a warm-brown tint (multiplied over the tarmac
+      // texture) so they read as loose dirt/gravel, not asphalt. Tarmac = white
+      // (no tint).
+      if (p.dirt) { cols.push(0.86, 0.62, 0.40, 0.86, 0.62, 0.40); } else { cols.push(1, 1, 1, 1, 1, 1); }
       const next = i + 1;
       if (next < tp.length) {
         const r = i * 2;
@@ -479,8 +486,9 @@ export class GameGraphics {
     }
     roadGeo.setAttribute('position', new THREE.Float32BufferAttribute(verts, 3));
     roadGeo.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
+    roadGeo.setAttribute('color', new THREE.Float32BufferAttribute(cols, 3));
     roadGeo.setIndex(idx); roadGeo.computeVertexNormals();
-    const roadMat = new THREE.MeshStandardMaterial({ color: trackDef.roadColor, roughness: trackDef.theme === 'forest' ? 1 : 0.85, metalness: 0.02, side: THREE.DoubleSide, flatShading: true });
+    const roadMat = new THREE.MeshStandardMaterial({ color: trackDef.roadColor, roughness: trackDef.theme === 'forest' ? 1 : 0.85, metalness: 0.02, side: THREE.DoubleSide, flatShading: true, vertexColors: true });
     this.roadMesh = new THREE.Mesh(roadGeo, roadMat);
     this.roadMesh.receiveShadow = true;
     this.scene.add(this.roadMesh);
@@ -692,49 +700,55 @@ export class GameGraphics {
   private generateScenery(trackDef: TrackDefinition, tp: TrackPoint[]) {
     const theme = trackDef.theme;
     const step = 3;
-    const treeLeaf = new THREE.MeshStandardMaterial({ color: theme === 'forest' ? '#1f5e2a' : '#2a7d3a', roughness: 0.9, flatShading: true });
     const trunkMat = new THREE.MeshStandardMaterial({ color: '#4a3524', roughness: 0.9 });
-    const treeGeo = new THREE.ConeGeometry(2.6, theme === 'forest' ? 12 : 7, 6);
+    const leafForest = new THREE.MeshStandardMaterial({ color: '#1f5e2a', roughness: 0.9, flatShading: true });
+    const leafGeneric = new THREE.MeshStandardMaterial({ color: '#2a7d3a', roughness: 0.9, flatShading: true });
+    const treeGeoTall = new THREE.ConeGeometry(2.6, 12, 6);  // forest pines
+    const treeGeoShort = new THREE.ConeGeometry(2.6, 7, 6);   // meadow / hill trees
     const trunkGeo = new THREE.CylinderGeometry(0.4, 0.55, 3, 5);
     const rockGeo = new THREE.DodecahedronGeometry(1.4, 0);
     const rockMat = new THREE.MeshStandardMaterial({ color: '#6f6f74', roughness: 0.95, flatShading: true });
     const houseColors = ['#c9ada7', '#8d99ae', '#a8c0c4', '#d8d8d2', '#b0846a'];
     const roofColors = ['#9a031e', '#2b2d42', '#5a4b6d', '#e76f51', '#3a5a40'];
-    const isCity = theme === 'city' || theme === 'harbour' || theme === 'coast';
-    // Desert / airfield: pines look absurd — sparse cacti and lots of rocks.
-    const desertish = theme === 'desert' || theme === 'airport';
     const cactusMat = new THREE.MeshStandardMaterial({ color: '#3f7d44', roughness: 0.85, flatShading: true });
     const cactusGeo = new THREE.CylinderGeometry(0.3, 0.36, 2.8, 6);
     const cactusArmGeo = new THREE.CylinderGeometry(0.15, 0.18, 1.1, 5);
     const roofGeo = new THREE.ConeGeometry(8, 5, 4);
 
     // Everything spawns BEYOND the invisible wall so a car can never drive
-    // through a tree/rock (they had no collision). +3 m clear of the boundary.
+    // through a tree/rock. Scenery TYPE follows each node's BIOME, so a
+    // multi-biome track visibly changes character as you lap: towers downtown,
+    // pines in the woods, boulders on the mountain, cacti in the desert.
     const margin = wallMargin(theme);
     for (let i = 0; i < tp.length; i += step) {
       const p = tp[i]; const hw = p.width / 2;
+      const bt = p.biome || theme;
+      // Single-theme tracks keep coast as a built-up shoreline; a biome 'coast'
+      // band is an open grassy hillside instead (trees, no towers).
+      const cityHere = p.biome ? (bt === 'city' || bt === 'harbour') : (bt === 'city' || bt === 'harbour' || bt === 'coast');
+      const desertHere = bt === 'desert' || bt === 'airport';
+      const forestHere = bt === 'forest';
       for (const side of [-1, 1]) {
         const dist = hw + margin + 3 + Math.random() * 14;
         const px = p.pos.x + p.normal.x * side * dist;
         const pz = p.pos.z + p.normal.z * side * dist;
         // Sit on the terrain skirt, not the (possibly far-away) node height.
         const py = this.groundY(p.pos.y, dist - hw);
-        if (Math.random() > (desertish ? 0.75 : 0.4)) {
-          if (isCity && Math.random() > 0.45) {
+        if (Math.random() > (desertHere ? 0.75 : 0.4)) {
+          if (cityHere && Math.random() > 0.45) {
             const ci = Math.floor(Math.random() * houseColors.length);
-            const height = 9 + Math.random() * (theme === 'city' ? 34 : 16);
+            const height = 9 + Math.random() * (bt === 'city' ? 34 : 16);
             const bw = 8 + Math.random() * 7, bd = 8 + Math.random() * 7;
             const bGeo = new THREE.BoxGeometry(bw, height, bd);
-            // Push the building out by its own half-footprint so its FACE (not
-            // just its centre) clears the wall — otherwise big buildings' bodies
-            // reached inside the boundary and the car drove through them.
+            // Push the building out by its own half-footprint so its FACE clears
+            // the wall, not just its centre.
             const bdist = hw + margin + Math.max(bw, bd) * 0.5 + 2 + Math.random() * 8;
             const bx = p.pos.x + p.normal.x * side * bdist, bz = p.pos.z + p.normal.z * side * bdist;
             const by = this.groundY(p.pos.y, bdist - hw);
             const house = new THREE.Mesh(bGeo, new THREE.MeshStandardMaterial({ color: houseColors[ci], flatShading: true, roughness: 0.8 }));
             house.position.set(bx, by + height / 2, bz); house.castShadow = true; house.receiveShadow = true;
             this.sceneryGroup.add(house);
-            if (theme !== 'city') {
+            if (bt !== 'city') {
               const roof = new THREE.Mesh(roofGeo, new THREE.MeshStandardMaterial({ color: roofColors[ci], flatShading: true }));
               roof.position.set(bx, by + height + 2, bz); roof.rotation.y = Math.PI / 4; roof.castShadow = true;
               this.sceneryGroup.add(roof);
@@ -746,18 +760,19 @@ export class GameGraphics {
               this.sceneryGroup.add(win);
               house.scale.setScalar(1.02);
             }
-          } else if (desertish) {
+          } else if (desertHere) {
             const body = new THREE.Mesh(cactusGeo, cactusMat); body.position.set(px, py + 1.4, pz); body.castShadow = true;
             const arm = new THREE.Mesh(cactusArmGeo, cactusMat); arm.position.set(px + 0.5, py + 1.9, pz); arm.castShadow = true;
             this.sceneryGroup.add(body, arm);
           } else {
             const trunk = new THREE.Mesh(trunkGeo, trunkMat); trunk.position.set(px, py + 1.5, pz); trunk.castShadow = true;
-            const leaves = new THREE.Mesh(treeGeo, treeLeaf); leaves.position.set(px, py + (theme === 'forest' ? 8 : 5.5), pz); leaves.castShadow = true;
+            const leaves = new THREE.Mesh(forestHere ? treeGeoTall : treeGeoShort, forestHere ? leafForest : leafGeneric);
+            leaves.position.set(px, py + (forestHere ? 8 : 5.5), pz); leaves.castShadow = true;
             leaves.scale.setScalar(0.8 + Math.random() * 0.6);
             this.sceneryGroup.add(trunk, leaves);
           }
         }
-        if (Math.random() > (desertish ? 0.55 : 0.85)) {
+        if (Math.random() > (desertHere ? 0.55 : 0.85)) {
           const rockScale = 0.4 + Math.random();
           // Rock radius ~ rockScale * 1.4 (DodecahedronGeometry(1.4)); clear the
           // wall by the radius so even the biggest rocks don't intrude.
@@ -984,8 +999,18 @@ export class GameGraphics {
 
     // Behind the car along forward = (s,c).
     const camX = state.x + s * offBack + jitter();
-    const camY = state.y + offY + jitter() * 0.4;
+    let camY = state.y + offY + jitter() * 0.4;
     const camZ = state.z + c * offBack + jitter();
+    // Never let the camera drop below the terrain it sits over. On steep
+    // switchback descents the ground 8.5 m behind the car (up the hill) rises
+    // above the camera, so it used to end up UNDER the ground plane and we saw
+    // its underside — the "car is below the map" look. Sample the road height at
+    // the camera position and lift the camera to stay a clear margin above it.
+    if (this.camTp.length > 2) {
+      this.camHint = TrackBuilder.nearestIndex(camX, camZ, this.camTp, this.camHint, 60);
+      const groundAtCam = roadHeightAt(this.camTp, this.camHint, camX, camZ);
+      camY = Math.max(camY, groundAtCam + 2.4);
+    }
     if (!this.camInit) { this.camera.position.set(camX, camY, camZ); this.camInit = true; }
     this.camera.position.lerp(new THREE.Vector3(camX, camY, camZ), Math.min(1, dt * lag));
 
@@ -993,7 +1018,7 @@ export class GameGraphics {
     this.camera.lookAt(lookTarget);
   }
 
-  public resetCamera() { this.camInit = false; }
+  public resetCamera() { this.camInit = false; this.camHint = 0; }
 
   public dispose() {
     window.removeEventListener('resize', this.onResize);

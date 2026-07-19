@@ -178,7 +178,7 @@ export interface PlayerStats {
   activeCarId: string;
 }
 
-export type TrackId = 'circuit' | 'touge' | 'highway' | 'drag' | 'rally' | 'city' | 'alpine' | 'canyon' | 'oval' | 'seaside' | 'apex' | 'titan';
+export type TrackId = 'circuit' | 'highway' | 'drag' | 'rally' | 'city' | 'canyon' | 'oval' | 'seaside' | 'apex' | 'grandtour';
 export type WeatherType = 'sunny' | 'rainy' | 'snowy' | 'foggy' | 'night';
 export type RaceMode = 'circuit' | 'touge' | 'sprint' | 'drag' | 'drift' | 'freeroam';
 

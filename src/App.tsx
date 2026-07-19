@@ -146,6 +146,7 @@ export const App: React.FC = () => {
 
     const trackDef = TRACKS[config.trackId];
     const tp = TrackBuilder.buildSplineTrack(trackDef.points, trackDef.width, trackDef.isClosed);
+    TrackBuilder.assignBiomes(tp, trackDef.biomes); // tag per-section biome/dirt for scenery + surface
     tpRef.current = tp;
     terrRef.current = terrainInfo(tp);
     if (import.meta.env.DEV) (window as any).__track = tp.map(pt => ({ x: pt.pos.x, z: pt.pos.z, tx: pt.tangent.x, tz: pt.tangent.z, w: pt.width }));
@@ -176,6 +177,7 @@ export const App: React.FC = () => {
     container.innerHTML = '';
     const gfx = new GameGraphics(container, 0.6);
     gfxRef.current = gfx;
+    if (import.meta.env.DEV) (window as any).__gfx = gfx;
     gfx.buildTrackGraphics(trackDef, tp, config.weather);
     gfx.buildCarGraphics(loadout, carDef.id);
     gfx.resetCamera();
@@ -493,7 +495,7 @@ export const App: React.FC = () => {
     const place = posRef.current;
     const total = oppsRef.current.length + 1;
     const placeBonus = place === 1 ? 2.0 : place === 2 ? 1.5 : place === 3 ? 1.2 : place <= total / 2 ? 0.9 : 0.6;
-    const base = config.trackId === 'drag' ? 1600 : config.trackId === 'touge' ? 4200 : 3000;
+    const base = config.trackId === 'drag' ? 1600 : config.trackId === 'grandtour' ? 4600 : 3000;
     const drift = Math.floor(p.driftScore);
     const diffMult = difficultyPayout(config.difficulty);
     const credits = Math.floor((base * placeBonus + drift * 0.2) * diffMult);

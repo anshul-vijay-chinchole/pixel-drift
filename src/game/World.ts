@@ -7,9 +7,16 @@ export interface TrackPoint {
   normal: THREE.Vector3;   // (-tangent.z, 0, tangent.x): PHYSICS-left of travel = the viewer's RIGHT through the chase cam
   curvature: number;       // tangent turn between adjacent nodes
   dist: number;            // cumulative arc length from start (m)
+  biome?: TrackTheme;      // per-section theme for multi-biome tracks (scenery + ground tint)
+  dirt?: boolean;          // this section is loose dirt/gravel (physics + look)
 }
 
 export type TrackTheme = 'harbour' | 'mountain' | 'coast' | 'airport' | 'forest' | 'city' | 'desert';
+
+// A multi-biome track hands out a per-section theme (and optional dirt surface)
+// along its length so one big loop can pass through city, forest, mountain and
+// desert. `until` is the arc-length fraction (0..1) where this biome ends.
+export interface BiomeBand { until: number; theme: TrackTheme; dirt?: boolean; }
 
 export interface TrackDefinition {
   id: string;
@@ -23,6 +30,7 @@ export interface TrackDefinition {
   roadColor: string;
   idealLine: THREE.Vector2[];
   length: number; // metres (filled at build)
+  biomes?: BiomeBand[]; // optional per-section biomes (multi-biome flagship)
 }
 
 // How far past the road edge you can go before the invisible wall / drop-off,
@@ -110,6 +118,20 @@ export class TrackBuilder {
     return trackPoints;
   }
 
+  // Tag each built point with its biome + dirt flag from the track's biome
+  // bands (by arc-length fraction), so scenery, ground tint and the physics
+  // surface all switch together as the loop passes through each region.
+  public static assignBiomes(tp: TrackPoint[], biomes?: BiomeBand[]): void {
+    if (!biomes || !biomes.length) return;
+    const total = tp[tp.length - 1].dist || 1;
+    for (const p of tp) {
+      const frac = p.dist / total;
+      const band = biomes.find(b => frac <= b.until) || biomes[biomes.length - 1];
+      p.biome = band.theme;
+      p.dirt = !!band.dirt;
+    }
+  }
+
   // Signed curvature direction at a node: >0 = turning toward PHYSICS-right
   // (cos yaw, -sin yaw), i.e. the -normal side (the viewer sees that as a LEFT
   // turn through the chase cam). Consumers (AI apex bias) pair it with -normal,
@@ -143,19 +165,20 @@ export class TrackBuilder {
     const lateral = Math.abs(signedLateral);
     const halfWidth = closest.width / 2;
 
+    const dirt = trackId === 'rally' || !!closest.dirt; // whole-track rally OR a per-section dirt biome
     let surface = 'grass';
     let onCurb = false;
     if (lateral <= halfWidth) {
-      if (trackId === 'rally') {
+      if (dirt) {
         surface = 'gravel';
       } else {
         surface = isWet ? 'asphalt_wet' : 'asphalt_dry';
       }
-      if (trackId !== 'rally' && lateral > halfWidth - 1.1) onCurb = true;
+      if (!dirt && lateral > halfWidth - 1.1) onCurb = true;
     } else if (lateral <= halfWidth + 6) {
       // Wider run-off apron (was 3.5 m) — a gravel/sand shoulder you can drop a
       // wheel onto and recover, before it turns into slow grass further out.
-      surface = trackId === 'rally' ? 'grass' : trackId === 'drag' || trackId === 'highway' || trackId === 'canyon' ? 'sand' : 'gravel';
+      surface = dirt ? 'grass' : trackId === 'drag' || trackId === 'highway' || trackId === 'canyon' ? 'sand' : 'gravel';
     }
     return { surface, distToCenter: lateral, signedLateral, segmentIndex: idx, onCurb };
   }
@@ -183,22 +206,6 @@ export const TRACKS: Record<string, TrackDefinition> = {
       new THREE.Vector3(-245, 0, 415), new THREE.Vector3(-290, 0, 330),                                 // lighthouse curve
       new THREE.Vector3(-275, 0, 205), new THREE.Vector3(-255, 0, 90),                                  // final bend
       new THREE.Vector3(-240, 0, 0)                                                                      // onto the straight
-    ],
-    idealLine: [], length: 0
-  },
-  touge: {
-    id: 'touge', name: 'Akina Mountain Pass', theme: 'mountain',
-    description: 'A relentless downhill of linked switchbacks and blind crests. Drift heaven — with drop-offs waiting.',
-    width: 9, isClosed: false, groundColor: '#2a3b28', roadColor: '#3a3a40',
-    points: [
-      new THREE.Vector3(0, 0, 0), new THREE.Vector3(90, -8, 70), new THREE.Vector3(130, -14, 160),      // opening leg
-      new THREE.Vector3(70, -22, 215),                                                                    // U-turn 1
-      new THREE.Vector3(-40, -30, 190), new THREE.Vector3(-130, -38, 240),                               // return leg
-      new THREE.Vector3(-160, -46, 330),                                                                  // U-turn 2
-      new THREE.Vector3(-80, -54, 380), new THREE.Vector3(30, -62, 360), new THREE.Vector3(120, -70, 420),// esses
-      new THREE.Vector3(150, -78, 510),                                                                   // U-turn 3
-      new THREE.Vector3(60, -86, 560), new THREE.Vector3(-60, -94, 540), new THREE.Vector3(-150, -102, 600),
-      new THREE.Vector3(-120, -110, 690), new THREE.Vector3(0, -118, 730), new THREE.Vector3(120, -126, 760) // finish run
     ],
     idealLine: [], length: 0
   },
@@ -256,26 +263,9 @@ export const TRACKS: Record<string, TrackDefinition> = {
     ],
     idealLine: [], length: 0
   },
-  titan: {
-    id: 'titan', name: 'Titan Ridge', theme: 'mountain',
-    description: 'The ultimate test. A 2.3 km mountain circuit crammed with corners: a rising T1 sweep to a summit, a top-of-the-world esses complex, a plunging far-side descent and a brutal 19 m stadium hairpin. Big elevation, tight walls, no let-up.',
-    width: 12, isClosed: true, groundColor: '#3a4a35', roadColor: '#33333a',
-    points: [
-      new THREE.Vector3(-180, 0, 0), new THREE.Vector3(60, 0, 0), new THREE.Vector3(220, 0, 0),          // pit straight (start line mid-straight)
-      new THREE.Vector3(330, 6, 60), new THREE.Vector3(380, 14, 170), new THREE.Vector3(340, 22, 280),   // T1 rising sweep to the crest
-      new THREE.Vector3(240, 28, 340), new THREE.Vector3(120, 30, 320),                                  // fast left over the top
-      new THREE.Vector3(60, 28, 380), new THREE.Vector3(120, 26, 450), new THREE.Vector3(20, 24, 480),   // summit esses complex
-      new THREE.Vector3(-120, 24, 460), new THREE.Vector3(-240, 20, 400),                                // top-left sweep
-      new THREE.Vector3(-340, 14, 300), new THREE.Vector3(-390, 8, 180),                                 // plunging far-side descent
-      new THREE.Vector3(-370, 5, 80), new THREE.Vector3(-435, 3, 25),                                    // wide entry into the stadium hairpin
-      new THREE.Vector3(-445, 1, -40), new THREE.Vector3(-395, 0, -70),                                  // rounded hairpin apex (R~15 m > 6 m half-width, no edge fold)
-      new THREE.Vector3(-330, 0, 0), new THREE.Vector3(-260, 0, 0), new THREE.Vector3(-200, 0, 0)        // long run-in to the straight
-    ],
-    idealLine: [], length: 0
-  },
   apex: {
     id: 'apex', name: 'Apex Grand Prix', theme: 'harbour',
-    description: 'The flagship. A 2.5 km grand-prix circuit: a long pit straight into a fast rising right-hander, a downhill esses complex, a stadium hairpin and a flat-out sweep back to the line. Elevation everywhere.',
+    description: 'A polished 2.5 km grand-prix circuit: a long pit straight into a fast rising right-hander, a downhill esses complex, a stadium hairpin and a flat-out sweep back to the line. Elevation everywhere.',
     width: 14, isClosed: true, groundColor: '#25402b', roadColor: '#34343c',
     points: [
       new THREE.Vector3(-180, 0, 0), new THREE.Vector3(50, 0, 0), new THREE.Vector3(270, 0, 0),      // pit straight (start line mid-straight)
@@ -341,15 +331,39 @@ export const TRACKS: Record<string, TrackDefinition> = {
     ],
     idealLine: [], length: 0
   },
-  alpine: {
-    id: 'alpine', name: 'Alpine Ring', theme: 'mountain',
-    description: 'A high-altitude tarmac loop: a climbing esses section, a summit hairpin and a fast blind drop back to the line.',
-    width: 12, isClosed: true, groundColor: '#3a4a35', roadColor: '#3a3a40',
+  grandtour: {
+    id: 'grandtour', name: 'Grand Tour Megacircuit', theme: 'mountain',
+    description: 'THE flagship. A colossal 6.5 km grand tour that leaves downtown, climbs through pine forest to a 55 m alpine summit, threads a ridge-top esses complex, plunges into a loose desert dirt descent, sweeps a grassy hillside and rifles back down a long straight to the line. City, forest, mountain and dirt — every kind of corner, one lap.',
+    width: 14, isClosed: true, groundColor: '#3a4436', roadColor: '#34343c',
+    // Biomes by arc-length fraction: downtown start -> pine forest climb ->
+    // alpine mountain ridge -> forest descent -> desert DIRT section -> grassy
+    // hill -> back onto the city start straight. Scenery, ground tint and the
+    // physics surface all switch with these bands.
+    biomes: [
+      { until: 0.05, theme: 'city' },
+      { until: 0.19, theme: 'forest' },
+      { until: 0.49, theme: 'mountain' },
+      { until: 0.61, theme: 'forest' },
+      { until: 0.81, theme: 'desert', dirt: true },
+      { until: 0.90, theme: 'coast' },   // open grassy hillside (grass ground)
+      { until: 1.01, theme: 'city' },
+    ],
     points: [
-      new THREE.Vector3(0, 0, 0), new THREE.Vector3(150, 8, 15), new THREE.Vector3(250, 16, 85),
-      new THREE.Vector3(275, 24, 200), new THREE.Vector3(200, 30, 290), new THREE.Vector3(75, 32, 330),
-      new THREE.Vector3(-50, 28, 310), new THREE.Vector3(-115, 20, 220),                                 // summit hairpin
-      new THREE.Vector3(-75, 14, 130), new THREE.Vector3(-160, 10, 60), new THREE.Vector3(-105, 4, -15)  // blind drop home
+      new THREE.Vector3(459, 0, -14),                                                  // 0: START/FINISH (end of the city straight)
+      new THREE.Vector3(702, 5, 81), new THREE.Vector3(864, 14, 230),                  // rising T1 out of downtown
+      new THREE.Vector3(972, 29, 432), new THREE.Vector3(1067, 41, 662),               // into the pine forest, climbing hard
+      new THREE.Vector3(1175, 50, 891), new THREE.Vector3(1323, 55, 1107),             // summit approach (top ~55 m)
+      new THREE.Vector3(1499, 53, 1283), new THREE.Vector3(1620, 48, 1445),            // the alpine summit sweep
+      new THREE.Vector3(1539, 41, 1580), new THREE.Vector3(1310, 36, 1593),            // ridge esses (top of the world)
+      new THREE.Vector3(1067, 31, 1539), new THREE.Vector3(824, 29, 1607),             // ridge esses cont.
+      new THREE.Vector3(581, 26, 1539), new THREE.Vector3(338, 22, 1593),              // fast forest descent begins
+      new THREE.Vector3(149, 17, 1472), new THREE.Vector3(54, 12, 1269),               // plunge down the north face
+      new THREE.Vector3(-41, 10, 1067), new THREE.Vector3(-149, 7, 878),               // into the desert wash (DIRT)
+      new THREE.Vector3(-243, 7, 675), new THREE.Vector3(-189, 7, 486),                // dirt switchback
+      new THREE.Vector3(-324, 5, 338), new THREE.Vector3(-432, 2, 176),                // dirt run to the far corner
+      new THREE.Vector3(-486, 0, 27), new THREE.Vector3(-432, 0, -108),                // grassy hillside U-turn
+      new THREE.Vector3(-270, 0, -95), new THREE.Vector3(-351, 0, -27),                // onto the long city back straight
+      new THREE.Vector3(-81, 0, 0), new THREE.Vector3(189, 0, 14),                     // the ~800 m start straight (grid forms up here)
     ],
     idealLine: [], length: 0
   }

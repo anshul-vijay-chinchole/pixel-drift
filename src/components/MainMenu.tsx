@@ -65,7 +65,7 @@ export const MainMenu: React.FC<MainMenuProps> = ({ onOpenGarage }) => {
     startRace({
       trackId: selectedTrack,
       weather: selectedWeather,
-      mode: selectedTrack === 'touge' ? 'touge' : selectedTrack === 'drag' ? 'drag' : 'circuit',
+      mode: selectedTrack === 'drag' ? 'drag' : 'circuit',
       laps: track.isClosed ? laps : 1,
       opponentsCount: selectedTrack === 'drag' ? 0 : gridSize,
       difficulty
@@ -107,7 +107,7 @@ export const MainMenu: React.FC<MainMenuProps> = ({ onOpenGarage }) => {
                     className={`track-card ${selectedTrack === t.id ? 'selected' : ''}`}
                     onClick={() => setSelectedTrack(t.id as TrackId)}
                   >
-                    {t.id === 'apex' && <span className="flagship-badge">★ FLAGSHIP</span>}
+                    {t.id === 'grandtour' && <span className="flagship-badge">★ FLAGSHIP</span>}
                     <TrackThumb points={t.idealLine} closed={t.isClosed} active={selectedTrack === t.id} />
                     <div className="track-card-info">
                       <span className="track-card-name">{t.name}</span>
