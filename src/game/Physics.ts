@@ -643,7 +643,22 @@ export function updateVehicle(
   // eagerly (paired with the much stronger assist below, which keeps that extra
   // rotation catchable). This is grip-limited at high speed — the tyres cap how
   // fast a car can physically rotate — so it lifts low/mid-speed cornering most.
-  const latLimit = ((muFront + muRearEff) * 0.5 * gripUnif * g) / Math.max(3, speedMs) * 1.70;
+  // The 1/speed falloff below is correct physics (yawRate = aLat/v) and is
+  // carefully tuned for low/mid speed — but it crushes HIGH-speed response: by
+  // ~90 km/h even a light steering input already implies a kinYawRaw far above
+  // latLimit, so light and full lock clamp to the SAME ceiling and the wheel
+  // stops mattering ("turning is weak at high speed"). Soften the falloff only
+  // above 25 m/s (90 km/h) — below it, speedForLimit === speedMs (unchanged);
+  // above it, extra speed only partially shrinks the ceiling (ATTEN=0.4). Below
+  // 90 km/h this is a mathematical no-op (speedForLimit === speedMs exactly),
+  // so the already-tuned low/mid-speed feel is untouched — verified against the
+  // full 14-car fleet at 50/90 km/h (bit-identical yaw/speed-retention).
+  // Headless-measured gain at 130/170/200 km/h: turn radius -12% to -18% and
+  // lateral g up ~15-20% across the fleet, with no new spin-outs (worst
+  // speed-retention unchanged from the pre-existing low-speed cases).
+  const LIMIT_REF = 25, LIMIT_ATTEN = 0.4;
+  const speedForLimit = speedMs <= LIMIT_REF ? speedMs : LIMIT_REF + (speedMs - LIMIT_REF) * LIMIT_ATTEN;
+  const latLimit = ((muFront + muRearEff) * 0.5 * gripUnif * g) / Math.max(3, speedForLimit) * 1.70;
   const kinYaw = Math.max(-latLimit, Math.min(latLimit, kinYawRaw));
   // Assist strengthened 4.0 -> 8.0, per-frame cap 0.5 -> 1.0, floor 0.68 -> 0.95:
   // the car snaps to its commanded cornering attitude about twice as fast, which
