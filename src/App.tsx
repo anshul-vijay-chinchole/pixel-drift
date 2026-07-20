@@ -12,7 +12,7 @@ import { TrafficEngine, TrafficVehicle } from './game/Traffic';
 import { ReplaySystem } from './game/Replay';
 import { sound } from './game/Sound';
 import confetti from 'canvas-confetti';
-import { Trophy, CheckCircle, Play, RotateCcw, MapPin, LogOut } from 'lucide-react';
+import { Trophy, CheckCircle, Play, RotateCcw, MapPin, LogOut, Gauge } from 'lucide-react';
 
 type Screen = 'menu' | 'garage' | 'race' | 'summary';
 type Phase = 'countdown' | 'racing' | 'paused' | 'finished';
@@ -20,7 +20,7 @@ type Phase = 'countdown' | 'racing' | 'paused' | 'finished';
 const CAM_MODES: CameraMode[] = ['chase', 'hood', 'drone'];
 
 export const App: React.FC = () => {
-  const { stats, cars, activeRace, exitRace } = useGame();
+  const { stats, cars, activeRace, exitRace, setSteerSensitivity } = useGame();
 
   const [screen, setScreen] = useState<Screen>('menu');
   const [summary, setSummary] = useState<{ credits: number; xp: number; place: number; total: number; time: number; best: number; drift: number } | null>(null);
@@ -64,6 +64,8 @@ export const App: React.FC = () => {
   const mutedRef = useRef(false);
   const redlineRef = useRef(8000);   // loadout-resolved redline (engine swaps change it)
   const boostMaxRef = useRef(0);     // loadout-resolved boost ceiling (for the HUD bar)
+  const sensRef = useRef(stats.steerSensitivity); // mirrored for the tick loop (refs, not state)
+  useEffect(() => { sensRef.current = stats.steerSensitivity; }, [stats.steerSensitivity]);
 
   // HUD state
   const [playerHUD, setPlayerHUD] = useState<VehicleState | null>(null);
@@ -284,7 +286,7 @@ export const App: React.FC = () => {
     }
 
     // ---- physics ----
-    updateVehicle(p, dt, inputs, sq.surface, carDef, loadout);
+    updateVehicle(p, dt, inputs, sq.surface, carDef, loadout, 1, sensRef.current);
     // Follow the exact terrain the mesh draws, using the SMOOTH interpolated road
     // height (not the nearest node) + a fast follow rate, so the car sits ON the
     // surface with no float on descents and no sink into climbs ("under the snow").
@@ -594,6 +596,24 @@ export const App: React.FC = () => {
               <button className="pause-btn" onClick={doRestart}><RotateCcw size={18} /> RESTART RACE</button>
               <button className="pause-btn" onClick={() => { togglePause(); respawn(); }}><MapPin size={18} /> RESPAWN ON TRACK</button>
               <button className="pause-btn danger" onClick={doExit}><LogOut size={18} /> QUIT TO MENU</button>
+            </div>
+            <div className="settings-block">
+              <label><Gauge size={14} /> STEERING SENSITIVITY</label>
+              <div className="sens-row">
+                <input
+                  type="range"
+                  min={0.7}
+                  max={1.6}
+                  step={0.05}
+                  value={stats.steerSensitivity}
+                  onChange={e => setSteerSensitivity(Number(e.target.value))}
+                  className="sens-slider"
+                />
+                <span className="sens-value">{Math.round(stats.steerSensitivity * 100)}%</span>
+              </div>
+              <div className="sens-hint">
+                <span>Numb / Safe</span><span>Default</span><span>Sharp / Twitchy</span>
+              </div>
             </div>
             <div className="controls-ref">
               <label>CONTROLS</label>

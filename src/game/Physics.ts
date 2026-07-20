@@ -251,9 +251,11 @@ export function updateVehicle(
   surfaceType: string,
   carDef: CarDefinition,
   loadout: CarLoadout,
-  perfBoost = 1 // AI difficulty bonus: >1 scales grip + power (player always 1)
+  perfBoost = 1, // AI difficulty bonus: >1 scales grip + power (player always 1)
+  steerSensitivity = 1 // player-facing Settings slider (0.7-1.6); AI always 1
 ): void {
   if (dt <= 0) return;
+  const sensitivity = Math.max(0.7, Math.min(1.6, steerSensitivity));
   if (dt > 0.05) dt = 0.05;
 
   const spec = carDef.specs;
@@ -278,9 +280,12 @@ export function updateVehicle(
   // mid-engine cars (nsx/f40/sv12, wd ~0.42) over-rotated and scrubbed nearly all
   // their speed (spun out) on a moderate input — a 2-3x turn-in spread. Pulling
   // the STEERING balance toward the (well-behaved) 50/50 cars equalizes turn-in
-  // for every car without touching grip, power or mass. 0 = fully uniform,
-  // 1 = raw physical spread.
-  const WD_UNIFORM = 0.27;
+  // for every car without touching grip, power or mass. 0 = fully uniform
+  // (every car uses the SAME 50/50 yaw moment arm), 1 = raw physical spread.
+  // Set to 0: per explicit request, every car's yaw geometry is now identical;
+  // the small residual turn-in spread across the fleet (~1.1-1.3x, headless-
+  // measured) comes from baseGrip/mass differences, not steering balance.
+  const WD_UNIFORM = 0.0;
   const wdEff = 0.5 + (spec.weightDistribution - 0.5) * WD_UNIFORM;
   const lf = wheelbase * (1 - wdEff);
   const lr = wheelbase * wdEff;
@@ -453,13 +458,13 @@ export function updateVehicle(
   const speedKmh = speedMs * 3.6;
   // UNIFORM steering sensitivity: base lock and steer rate are the same for
   // every car and every attachment (no maxSteerMult / steerRateMult), dialled up
-  // (0.82 -> 0.86) for a sharper response. Attachments still change
-  // grip/power/drift character — just not the raw steering feel. The other half
-  // of "uniform" is the WD_UNIFORM weight-distribution compression above (the
-  // yaw moment arms), which is what actually stops some cars refusing to turn
-  // while others spin — this lock/rate uniformity was necessary but not
-  // sufficient on its own.
-  const maxSteer = 0.86;
+  // (0.82 -> 0.86) for a sharper response, then scaled by the player's Settings
+  // sensitivity slider (AI always 1). Attachments still change grip/power/drift
+  // character — just not the raw steering feel. The other half of "uniform" is
+  // the WD_UNIFORM weight-distribution compression above (the yaw moment arms),
+  // which is what actually stops some cars refusing to turn while others spin —
+  // this lock/rate uniformity was necessary but not sufficient on its own.
+  const maxSteer = 0.86 * sensitivity;
   // Retain far more lock at speed (floor 0.74 -> 0.86) so the front bites at
   // every velocity, not just in town.
   const speedFactor = Math.max(0.86, 1 / (1 + speedKmh / 270));
@@ -643,22 +648,14 @@ export function updateVehicle(
   // eagerly (paired with the much stronger assist below, which keeps that extra
   // rotation catchable). This is grip-limited at high speed — the tyres cap how
   // fast a car can physically rotate — so it lifts low/mid-speed cornering most.
-  // The 1/speed falloff below is correct physics (yawRate = aLat/v) and is
-  // carefully tuned for low/mid speed — but it crushes HIGH-speed response: by
-  // ~90 km/h even a light steering input already implies a kinYawRaw far above
-  // latLimit, so light and full lock clamp to the SAME ceiling and the wheel
-  // stops mattering ("turning is weak at high speed"). Soften the falloff only
-  // above 25 m/s (90 km/h) — below it, speedForLimit === speedMs (unchanged);
-  // above it, extra speed only partially shrinks the ceiling (ATTEN=0.4). Below
-  // 90 km/h this is a mathematical no-op (speedForLimit === speedMs exactly),
-  // so the already-tuned low/mid-speed feel is untouched — verified against the
-  // full 14-car fleet at 50/90 km/h (bit-identical yaw/speed-retention).
-  // Headless-measured gain at 130/170/200 km/h: turn radius -12% to -18% and
-  // lateral g up ~15-20% across the fleet, with no new spin-outs (worst
-  // speed-retention unchanged from the pre-existing low-speed cases).
-  const LIMIT_REF = 25, LIMIT_ATTEN = 0.4;
-  const speedForLimit = speedMs <= LIMIT_REF ? speedMs : LIMIT_REF + (speedMs - LIMIT_REF) * LIMIT_ATTEN;
-  const latLimit = ((muFront + muRearEff) * 0.5 * gripUnif * g) / Math.max(3, speedForLimit) * 1.70;
+  // (A speed-falloff-softening experiment here was reverted: it raised the
+  // ceiling at high speed which let yawRate/vz grow further before the
+  // steering-limit assist's betaF-based delta cap engaged, and once that cap
+  // engages it tracks betaF (the car's OWN slide angle) instead of the driver's
+  // input — so at high speed the wheel could go from "weak" to "does nothing"
+  // once the car started sliding. High-speed feel is now tuned via the player
+  // sensitivity setting below instead of a single global constant.)
+  const latLimit = ((muFront + muRearEff) * 0.5 * gripUnif * g) / Math.max(3, speedMs) * 1.70 * sensitivity;
   const kinYaw = Math.max(-latLimit, Math.min(latLimit, kinYawRaw));
   // Assist strengthened 4.0 -> 8.0, per-frame cap 0.5 -> 1.0, floor 0.68 -> 0.95:
   // the car snaps to its commanded cornering attitude about twice as fast, which

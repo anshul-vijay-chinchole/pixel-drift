@@ -176,6 +176,7 @@ export interface PlayerStats {
   rallyRating: number;
   garage: Record<string, CarLoadout>;
   activeCarId: string;
+  steerSensitivity: number; // Settings slider (0.7-1.6, default 1.0) — scales steering lock + the assist's yaw ceiling, uniformly for every car
 }
 
 export type TrackId = 'circuit' | 'highway' | 'drag' | 'rally' | 'city' | 'canyon' | 'oval' | 'seaside' | 'apex';
@@ -217,6 +218,7 @@ interface GameContextType {
   selectCar: (carId: string) => void;
   startRace: (config: RaceConfig) => void;
   exitRace: (payout?: { credits: number; xp: number; driftScore?: number }) => void;
+  setSteerSensitivity: (v: number) => void;
 }
 
 // Equal-but-different: every car sits in a tight hp/kg band (~0.165-0.18) with
@@ -326,7 +328,8 @@ const freshStats = (): PlayerStats => ({
   driftRating: 0,
   rallyRating: 0,
   garage: { ae86: { ...DEFAULT_LOADOUT, color: '#f0f0f0', plate: 'INITIAL' } },
-  activeCarId: 'ae86'
+  activeCarId: 'ae86',
+  steerSensitivity: 1.0
 });
 
 // Always merge onto DEFAULT_LOADOUT so a partial or older-schema saved loadout
@@ -385,6 +388,11 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }));
   };
 
+  const setSteerSensitivity = (v: number) => {
+    const clamped = Math.max(0.7, Math.min(1.6, v));
+    setStats(prev => ({ ...prev, steerSensitivity: clamped }));
+  };
+
   const startRace = (config: RaceConfig) => setActiveRace(config);
 
   const exitRace = (payout?: { credits: number; xp: number; driftScore?: number }) => {
@@ -408,7 +416,7 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   return (
-    <GameContext.Provider value={{ stats, cars: CAR_DATABASE, activeRace, setLoadout, selectCar, startRace, exitRace }}>
+    <GameContext.Provider value={{ stats, cars: CAR_DATABASE, activeRace, setLoadout, selectCar, startRace, exitRace, setSteerSensitivity }}>
       {children}
     </GameContext.Provider>
   );

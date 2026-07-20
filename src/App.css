@@ -992,6 +992,42 @@ body {
 }
 .pause-btn:hover { border-color: var(--color-neon-cyan); background: rgba(0,245,212,0.12); }
 .pause-btn.danger:hover { border-color: #d62828; background: rgba(214,40,40,0.15); }
+.settings-block {
+  border-top: 1px solid rgba(255,255,255,0.12); padding-top: 12px; margin-bottom: 12px;
+  text-align: left;
+}
+.settings-block > label {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 0.62rem; color: rgba(255,255,255,0.4); letter-spacing: 0.04em;
+}
+.sens-row { display: flex; align-items: center; gap: 12px; margin-top: 8px; }
+.sens-slider {
+  flex: 1; -webkit-appearance: none; appearance: none;
+  height: 4px; border-radius: 2px;
+  background: rgba(255,255,255,0.15); outline: none; cursor: pointer;
+}
+.sens-slider::-webkit-slider-thumb {
+  -webkit-appearance: none; appearance: none;
+  width: 16px; height: 16px; border-radius: 50%;
+  background: var(--color-neon-cyan);
+  box-shadow: 0 0 8px rgba(0,245,212,0.7);
+  cursor: pointer;
+}
+.sens-slider::-moz-range-thumb {
+  width: 16px; height: 16px; border-radius: 50%; border: none;
+  background: var(--color-neon-cyan);
+  box-shadow: 0 0 8px rgba(0,245,212,0.7);
+  cursor: pointer;
+}
+.sens-value {
+  font-family: var(--font-mono); font-size: 0.78rem; color: var(--color-neon-cyan);
+  min-width: 42px; text-align: right;
+}
+.sens-hint {
+  display: flex; justify-content: space-between;
+  font-family: var(--font-mono); font-size: 0.6rem; color: rgba(255,255,255,0.35);
+  margin-top: 4px;
+}
 .controls-ref { border-top: 1px solid rgba(255,255,255,0.12); padding-top: 12px; text-align: left; }
 .controls-ref > label { font-size: 0.62rem; color: rgba(255,255,255,0.4); }
 .controls-grid {
