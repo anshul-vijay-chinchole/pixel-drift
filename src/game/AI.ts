@@ -125,34 +125,41 @@ export class AIEngine {
     const opponents: OpponentRacer[] = [];
     const skill0 = baseSkill(difficulty);
     // Power-matched pool: opponents drive cars of a SIMILAR power level to the
-    // player's (no 168 hp vs 272) — take the closest cars by power, then shuffle.
+    // player's — take the closest cars by power, then shuffle; opponents cycle
+    // through the pool (pool[i % pool.length]) so a big grid just repeats the
+    // matched cars in different liveries. The pool size is FIXED at the 6 closest
+    // by power and is NOT scaled by `count` — the old `Math.max(count, 6)` meant a
+    // large grid (11/13/15 rivals) pulled in almost the whole roster, so with the
+    // now-widened 200..430 hp spread a 200 hp player could face a 430 hp rival
+    // (a 2.15x gap). Capping the pool keeps every rival power-matched at any grid
+    // size (worst case now ~1.5x, the closest-6 span, instead of 2.15x).
     const byPower = [...carDb].sort((a, b) => Math.abs(a.specs.power - playerPower) - Math.abs(b.specs.power - playerPower));
-    const pool = byPower.slice(0, Math.max(count, Math.min(carDb.length, 6))).sort(() => Math.random() - 0.5);
+    const pool = byPower.slice(0, Math.min(carDb.length, 6)).sort(() => Math.random() - 0.5);
 
     const profile = computeSpeedProfile(trackPoints, isClosed, weatherGripMult(weather));
 
     for (let i = 0; i < count; i++) {
       const persona = profiles[i % profiles.length];
       const carDef = pool[i % pool.length];
-      // Clamp ceiling raised 1.38 -> 1.55 -> 1.7 (2026-07-21, second pass per
-      // adversarial review): the 1.55 value only left ~2.3% headroom over the
-      // actual worst-case roll (Impossible 1.45 + pro persona 0.04 + max jitter
-      // 0.025 = 1.515) — thin enough that the NEXT difficulty bump could
-      // silently re-saturate it, exactly the bug this ceiling exists to avoid.
-      // 1.7 gives real margin (~12%) without changing today's actual values
-      // (still well under the ceiling, so behavior at current skill values is
-      // unchanged — this only affects future headroom).
-      const skill = Math.min(1.7, Math.max(0.4,
+      // Clamp ceiling 1.9 (2026-07-21, widened-spread pass): the worst-case roll
+      // is now Impossible 1.72 + pro persona 0.04 + max jitter 0.025 = 1.785, so
+      // 1.9 keeps ~6% real headroom over it — enough that a future top-tier bump
+      // won't silently clip. Floor unchanged (Novice 0.60 + rookie persona -0.05
+      // - jitter = ~0.525, well above 0.4).
+      const skill = Math.min(1.9, Math.max(0.4,
         skill0 + (Math.random() - 0.5) * 0.05 + (persona === 'pro' ? 0.04 : persona === 'rookie' ? -0.05 : 0)));
       // Performance "bonus": higher tiers get faster machinery (more grip+power),
       // so they genuinely pull away — the way you make racing AI hard once their
-      // driving is already near-optimal. Novice +6% up to Impossible ~+35%.
-      // ×1.2 (cap raised to match): rivals run a 20% bigger car-performance edge
-      // across EVERY tier — sqrt(perfBoost) feeds corner speed AND the top-speed
-      // cap, so this is a genuine across-the-board pace gain, not a knob tweak.
-      // Cap 1.62 -> 1.85 -> 2.1 (2026-07-21, same headroom pass): same thin-
-      // margin concern as the skill clamp above (only ~3.6% headroom at 1.85).
-      const perfBoost = Math.min(2.1, (1.06 + Math.max(0, skill - 0.78) * 0.58) * 1.2);
+      // driving is already near-optimal. sqrt(perfBoost) feeds BOTH corner speed
+      // (speed profile) and the top-speed cap, so it's a real across-the-board
+      // pace gain. STEEPENED RAMP (was 1.06 + (skill-0.78)*0.58, ×1.2, cap 2.1):
+      // a linear 1.08 + (skill-0.60)*1.02 gives a much wider tier-to-tier spread —
+      // Novice ~1.08 (near player parity: a fair fight you can win outright) up to
+      // Impossible ~2.22 (a ~+120% machinery edge — genuinely superhuman). This,
+      // plus the far higher Novice mistake rate (skill 0.60), is what finally
+      // makes the tiers feel distinct. Cap 2.6 keeps ~14% headroom over the
+      // worst-case roll (~2.29) so it can't silently re-saturate.
+      const perfBoost = Math.min(2.6, 1.08 + Math.max(0, skill - 0.60) * 1.02);
 
       const g = gridSpawn(trackPoints, isClosed, slots[i] ?? (i + 1));
       const state = initVehicleState(carDef);
@@ -233,8 +240,14 @@ export class AIEngine {
     // zero tier-to-tier differentiation from this term (differentiation had to
     // come entirely from perfBoost/capMs downstream). The new formula keeps
     // every tier >= its old value (novice ~unchanged, everyone else strictly
-    // higher) while giving genuine per-tier separation up to a raised ceiling —
-    // only Impossible now saturates, which is appropriate for "beyond the limit".
+    // higher) while giving genuine per-tier separation up to the 1.15 ceiling.
+    // After the widened-spread DIFFICULTIES retune the top TWO tiers now saturate
+    // here (Legend skill 1.44 -> 1.154 and Impossible 1.72 -> 1.207 both clamp to
+    // 1.15); Expert (1.26 -> 1.119) is the last tier this term still separates.
+    // That is fine — Legend vs Impossible differentiation is carried downstream by
+    // perfBoost (1.94 vs 2.22), boostSp and capMs, so overall pace stays monotonic
+    // (headless-verified). Anyone re-tuning this cap should know the top two tiers
+    // are pinned here, not just Impossible.
     const paceMult = Math.min(1.15, 0.88 + ai.skill * 0.19)
       // Loose grip: whole-track rally OR a per-node dirt/gravel biome band (e.g.
       // Highland's Dirt Rally section) — target a gravel-appropriate corner speed

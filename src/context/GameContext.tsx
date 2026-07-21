@@ -15,9 +15,15 @@ export interface CarSpecs {
   finalDrive: number;
 }
 
-// Nature classes, not power tiers — every car targets the same overall pace
-// (hp/kg ~0.165-0.18, with less power where AWD traction or high grip
-// compensates) and differs in HOW it's fast. Attachments customise from there.
+// Distinct archetypes with REAL trade-offs — NOT a "same overall pace" fleet and
+// NOT a strict better/worse ladder. Every car is quick and pulls hard (the whole
+// grid got faster + more powerful), but each one MAXES one or two things and pays
+// for it somewhere obvious: the muscle car has monster power + top speed but the
+// worst grip/handling; the grip cars corner like nothing else but give away
+// power; the AWD cars own the wet/dirt yet lug the most weight; the exotics are
+// outright fastest but demanding and heavy. Which car wins depends on the TRACK
+// and WEATHER, so the choice is a real decision, not "pick the newest one".
+// Attachments then customise from there.
 export type CarClass = 'DRIFT' | 'GRIP' | 'SPEED' | 'TURBO' | 'RALLY' | 'MUSCLE' | 'BALANCED';
 
 export interface CarDefinition {
@@ -183,25 +189,26 @@ export type TrackId = 'metro' | 'circuit' | 'highway' | 'drag' | 'rally' | 'city
 export type WeatherType = 'sunny' | 'rainy' | 'snowy' | 'foggy' | 'night';
 export type RaceMode = 'circuit' | 'touge' | 'sprint' | 'drag' | 'drift' | 'freeroam';
 
-// 7 difficulty tiers — a smooth skill ramp (each is ~1 driver-skill notch) with
-// matching payout scaling. Single source of truth for AI, payouts and the menu.
+// 8 difficulty tiers. Single source of truth for AI, payouts and the menu.
 export type Difficulty = 'novice' | 'rookie' | 'amateur' | 'semipro' | 'pro' | 'expert' | 'legend' | 'impossible';
-// 8 difficulty tiers. Every tier bumped again (2026-07-21) — larger increment
-// at the top so the hardest tiers feel meaningfully harder, smaller at the
-// bottom so Novice stays approachable. 'impossible' (skill >1) drives
-// flawlessly beyond the grip limit. NOTE: the spawn-time skill clamp (1.38)
-// and perfBoost cap (1.62) in AI.ts were BOTH already saturating near the old
-// top skill values — raised alongside this table (see AI.ts), otherwise a
-// skill-table bump alone would silently no-op for the hardest tiers.
+// WIDENED SPREAD (2026-07-21): the old 0.84..1.45 range made Novice and
+// Impossible feel too alike — Novice barely erred and Impossible wasn't much
+// faster. The band is now 0.60..1.72: the BOTTOM drops hard (the mistake term is
+// quadratic in (1-skill), so Novice 0.60 fumbles constantly and drives slow while
+// staying beatable) and the TOP climbs (Impossible 1.72 is flawless AND, via the
+// steepened perfBoost ramp in AI.ts, runs markedly faster machinery). Payouts
+// widen to match, so the hard tiers are worth chasing. NOTE: the AI.ts perfBoost
+// formula + skill clamp were retuned in lockstep — a table bump alone would clip
+// against the old caps and silently no-op at the extremes.
 export const DIFFICULTIES: { id: Difficulty; label: string; skill: number; payout: number; blurb: string }[] = [
-  { id: 'novice',     label: 'Novice',     skill: 0.84, payout: 0.85, blurb: 'Quick, occasional slips' },
-  { id: 'rookie',     label: 'Rookie',     skill: 0.90, payout: 1.00, blurb: 'Fast and consistent' },
-  { id: 'amateur',    label: 'Amateur',    skill: 0.96, payout: 1.15, blurb: 'Seriously challenging' },
-  { id: 'semipro',    label: 'Semi-Pro',   skill: 1.01, payout: 1.30, blurb: 'Very fast, defends hard' },
-  { id: 'pro',        label: 'Pro',        skill: 1.06, payout: 1.50, blurb: 'On the ragged edge' },
-  { id: 'expert',     label: 'Expert',     skill: 1.13, payout: 1.75, blurb: 'Relentless, near-flawless' },
-  { id: 'legend',     label: 'Legend',     skill: 1.22, payout: 2.10, blurb: 'Flawless and merciless' },
-  { id: 'impossible', label: 'Impossible', skill: 1.45, payout: 2.80, blurb: 'Superhuman — beyond the limit' },
+  { id: 'novice',     label: 'Novice',     skill: 0.60, payout: 0.70, blurb: 'Slow, fumbles constantly' },
+  { id: 'rookie',     label: 'Rookie',     skill: 0.74, payout: 0.90, blurb: 'Makes real mistakes' },
+  { id: 'amateur',    label: 'Amateur',    skill: 0.86, payout: 1.10, blurb: 'Holds a decent pace' },
+  { id: 'semipro',    label: 'Semi-Pro',   skill: 0.98, payout: 1.35, blurb: 'Fast and defends hard' },
+  { id: 'pro',        label: 'Pro',        skill: 1.10, payout: 1.65, blurb: 'On the ragged edge' },
+  { id: 'expert',     label: 'Expert',     skill: 1.26, payout: 2.05, blurb: 'Relentless, near-flawless' },
+  { id: 'legend',     label: 'Legend',     skill: 1.44, payout: 2.55, blurb: 'Flawless — a wall to pass' },
+  { id: 'impossible', label: 'Impossible', skill: 1.72, payout: 3.40, blurb: 'Superhuman — faster car, no mercy' },
 ];
 export const difficultySkill = (d: string): number => (DIFFICULTIES.find(x => x.id === d)?.skill ?? 0.7);
 export const difficultyPayout = (d: string): number => (DIFFICULTIES.find(x => x.id === d)?.payout ?? 1.0);
@@ -226,80 +233,82 @@ interface GameContextType {
   setSteerSensitivity: (v: number) => void;
 }
 
-// Equal-but-different: every car sits in a tight hp/kg band (~0.165-0.18) with
-// compensation logic — AWD traction and high base grip cost power; low grip,
-// high drag or ponderous mass buy it back. Character comes from drivetrain,
-// torque shape, redline, gearing and grip, not from a power ladder.
+// Distinct-with-trade-offs (see CarClass note above). Every car is faster and
+// more powerful than before; each 7-9-speed gearbox keeps it in the powerband so
+// it pulls hard. The SPREAD is deliberate: grip 0.82 (muscle) .. 0.97 (mid-engine
+// scalpel), power 200 .. 430 hp, mass 960 .. 1560 kg. A car with big power gives
+// away grip or agility; a grip monster gives away power; the AWD cars trade top
+// speed and weight for all-weather traction. No car is best everywhere.
 const CAR_DATABASE: CarDefinition[] = [
   {
     id: 'ae86', name: 'Trueno AE86', class: 'DRIFT',
-    description: 'Lightweight RWD icon. Lives at big slip angles — the easiest car here to steer with the throttle.',
-    specs: { mass: 970, power: 168, peakTorque: 190, redline: 7800, driveType: 'RWD', dragCoefficient: 0.35, downforceMultiplier: 0.05, weightDistribution: 0.5, baseGrip: 0.86, brakes: 1.0, gearRatios: [3.12, 1.9, 1.3, 0.97, 0.77], finalDrive: 4.3 }
+    description: 'Featherweight RWD trainer. Lives at big slip angles — the easiest car to steer on the throttle. The trade: least power and the lowest top speed on the grid, so it can only win where corners outnumber straights.',
+    specs: { mass: 960, power: 200, peakTorque: 205, redline: 8200, driveType: 'RWD', dragCoefficient: 0.35, downforceMultiplier: 0.05, weightDistribution: 0.5, baseGrip: 0.85, brakes: 1.05, gearRatios: [3.30, 2.30, 1.74, 1.36, 1.10, 0.92, 0.78], finalDrive: 4.30 }
   },
   {
     id: 'mx5', name: 'Roadster MX-5', class: 'BALANCED',
-    description: 'Featherweight RWD convertible. The sweetest, most tossable chassis here.',
-    specs: { mass: 1020, power: 175, peakTorque: 205, redline: 7000, driveType: 'RWD', dragCoefficient: 0.34, downforceMultiplier: 0.06, weightDistribution: 0.5, baseGrip: 0.88, brakes: 1.1, gearRatios: [3.14, 1.89, 1.33, 1.0, 0.81, 0.72], finalDrive: 4.1 }
+    description: 'The sweetest, most tossable chassis here — flick-it-anywhere agility and light, honest steering. Modest power and a low top speed mean you win by carrying corner speed, not out-dragging anyone.',
+    specs: { mass: 1010, power: 215, peakTorque: 220, redline: 7400, driveType: 'RWD', dragCoefficient: 0.34, downforceMultiplier: 0.07, weightDistribution: 0.5, baseGrip: 0.90, brakes: 1.15, gearRatios: [3.14, 2.20, 1.68, 1.33, 1.08, 0.90, 0.77], finalDrive: 4.10 }
   },
   {
-    id: 'ek9', name: 'Civic Type R EK9', class: 'BALANCED',
-    description: 'High-revving FWD legend. Point it, plant it — the most forgiving fast car in the game.',
-    specs: { mass: 1050, power: 182, peakTorque: 185, redline: 8400, driveType: 'FWD', dragCoefficient: 0.32, downforceMultiplier: 0.08, weightDistribution: 0.61, baseGrip: 0.87, brakes: 1.1, gearRatios: [3.23, 2.11, 1.46, 1.03, 0.85], finalDrive: 4.4 }
+    id: 'ek9', name: 'Civic Type R EK9', class: 'GRIP',
+    description: 'High-revving FWD point-and-squirt weapon. Superb traction out of slow corners and a brilliant wet-weather car, but it understeers into tight turns and runs out of top-end legs on long straights.',
+    specs: { mass: 1040, power: 225, peakTorque: 200, redline: 8600, driveType: 'FWD', dragCoefficient: 0.32, downforceMultiplier: 0.08, weightDistribution: 0.61, baseGrip: 0.89, brakes: 1.15, gearRatios: [3.23, 2.30, 1.70, 1.32, 1.06, 0.88, 0.76], finalDrive: 4.40 }
   },
   {
     id: 'gti', name: 'GTI Mk7 Hot Hatch', class: 'TURBO',
-    description: 'Turbo FWD all-rounder. Planted, punchy and a superb wet-weather weapon.',
-    specs: { mass: 1320, power: 232, peakTorque: 340, redline: 6500, driveType: 'FWD', dragCoefficient: 0.33, downforceMultiplier: 0.05, weightDistribution: 0.62, baseGrip: 0.88, brakes: 1.2, gearRatios: [3.5, 2.09, 1.47, 1.1, 0.87, 0.73], finalDrive: 3.9 }
+    description: 'Torque-rich turbo FWD all-rounder — planted, brilliant in the wet and strong once it is rolling. The catch is front drive: it cannot put its torque down cleanly from a standstill, so it launches soft, and the nose-led push blunts it in quick dry direction-changes where the RWD cars dance.',
+    specs: { mass: 1300, power: 285, peakTorque: 360, redline: 6600, driveType: 'FWD', dragCoefficient: 0.33, downforceMultiplier: 0.06, weightDistribution: 0.62, baseGrip: 0.90, brakes: 1.25, gearRatios: [3.50, 2.55, 1.95, 1.50, 1.18, 0.98, 0.82, 0.66], finalDrive: 3.90 }
   },
   {
     id: 'foxbody', name: 'Mustang GT Foxbody', class: 'MUSCLE',
-    description: 'Big V8 torque, loose rear, long gears. Wins the straights, dances the corners.',
-    specs: { mass: 1420, power: 258, peakTorque: 420, redline: 5800, driveType: 'RWD', dragCoefficient: 0.38, downforceMultiplier: 0.02, weightDistribution: 0.56, baseGrip: 0.84, brakes: 1.2, gearRatios: [3.35, 1.93, 1.29, 1.0, 0.68], finalDrive: 3.27 }
+    description: 'A V8 sledgehammer — monster torque and savage straight-line thrust. But it has the least grip on the grid, a loose rear and a lot of mass, so it wins the drag to the corner and then has to survive it.',
+    specs: { mass: 1440, power: 340, peakTorque: 540, redline: 6000, driveType: 'RWD', dragCoefficient: 0.38, downforceMultiplier: 0.02, weightDistribution: 0.56, baseGrip: 0.82, brakes: 1.20, gearRatios: [3.35, 2.30, 1.75, 1.36, 1.10, 0.90, 0.72], finalDrive: 3.31 }
   },
   {
     id: 'e30', name: 'M3 E30 Sport Evo', class: 'BALANCED',
-    description: 'The homologation legend. Revvy NA four and delicate RWD balance.',
-    specs: { mass: 1200, power: 205, peakTorque: 235, redline: 7600, driveType: 'RWD', dragCoefficient: 0.33, downforceMultiplier: 0.12, weightDistribution: 0.5, baseGrip: 0.9, brakes: 1.3, gearRatios: [3.68, 2.24, 1.56, 1.18, 1.0], finalDrive: 4.1 }
+    description: 'The homologation legend: revvy NA power and the most delicate, adjustable RWD balance in the game. No single headline stat — it just does everything well and rewards a precise driver on any dry circuit.',
+    specs: { mass: 1180, power: 250, peakTorque: 250, redline: 7800, driveType: 'RWD', dragCoefficient: 0.33, downforceMultiplier: 0.12, weightDistribution: 0.5, baseGrip: 0.91, brakes: 1.30, gearRatios: [3.68, 2.60, 1.95, 1.52, 1.22, 1.02, 0.86, 0.74], finalDrive: 4.10 }
   },
   {
     id: 'wrx', name: 'Impreza WRX STI', class: 'RALLY',
-    description: 'Turbo AWD rally machine. Trades outright power for traction on any surface, any weather.',
-    specs: { mass: 1450, power: 238, peakTorque: 350, redline: 7200, driveType: 'AWD', dragCoefficient: 0.33, downforceMultiplier: 0.15, weightDistribution: 0.58, baseGrip: 0.92, brakes: 1.3, gearRatios: [3.64, 2.37, 1.76, 1.35, 1.06, 0.84], finalDrive: 3.9 }
+    description: 'The AWD brawler — the most grunt and the highest top speed of the rally pair, and monster traction that hooks up and fires off the line on any surface. It gives away outright grip and agility to the lighter Evo, so it wants power-down corners and open straights, not a tight technical squiggle.',
+    specs: { mass: 1440, power: 325, peakTorque: 450, redline: 7000, driveType: 'AWD', dragCoefficient: 0.32, downforceMultiplier: 0.15, weightDistribution: 0.58, baseGrip: 0.92, brakes: 1.30, gearRatios: [3.64, 2.60, 1.96, 1.52, 1.22, 1.02, 0.82, 0.66], finalDrive: 3.90 }
   },
   {
     id: 'evo', name: 'Lancer Evo IX', class: 'RALLY',
-    description: 'Turbo AWD with computer diffs. Brutal corner-exit traction anywhere.',
-    specs: { mass: 1420, power: 235, peakTorque: 360, redline: 7000, driveType: 'AWD', dragCoefficient: 0.34, downforceMultiplier: 0.18, weightDistribution: 0.57, baseGrip: 0.93, brakes: 1.4, gearRatios: [2.9, 1.95, 1.41, 1.06, 0.84, 0.69], finalDrive: 4.53 }
+    description: 'The scalpel of the AWD pair — lighter, grippier and sharper thanks to its computer diffs, and the best wet/technical weapon in the game. The trade is muscle: it makes less power and tops out lower than the brawnier WRX, so it wins by out-cornering, not out-dragging.',
+    specs: { mass: 1380, power: 300, peakTorque: 410, redline: 7400, driveType: 'AWD', dragCoefficient: 0.34, downforceMultiplier: 0.20, weightDistribution: 0.57, baseGrip: 0.96, brakes: 1.45, gearRatios: [3.42, 2.45, 1.85, 1.44, 1.15, 0.96, 0.82, 0.70], finalDrive: 4.10 }
   },
   {
     id: 'gtr34', name: 'Skyline GT-R R34', class: 'TURBO',
-    description: 'High-tech AWD twin-turbo straight-6. Heavy, boosty, unshakeable.',
-    specs: { mass: 1560, power: 262, peakTorque: 380, redline: 8000, driveType: 'AWD', dragCoefficient: 0.3, downforceMultiplier: 0.22, weightDistribution: 0.55, baseGrip: 0.92, brakes: 1.5, gearRatios: [3.83, 2.36, 1.69, 1.31, 1.0, 0.79], finalDrive: 3.55 }
+    description: 'Heavy AWD twin-turbo with huge grip and huge power — planted and unshakeable at speed, a superb all-rounder. The catch is its mass: it is the least nimble car in quick tight stuff despite all that traction.',
+    specs: { mass: 1540, power: 340, peakTorque: 480, redline: 8000, driveType: 'AWD', dragCoefficient: 0.30, downforceMultiplier: 0.22, weightDistribution: 0.55, baseGrip: 0.93, brakes: 1.50, gearRatios: [3.55, 2.55, 1.95, 1.52, 1.22, 1.02, 0.86, 0.72], finalDrive: 3.55 }
   },
   {
     id: 'supra', name: 'Supra MK4', class: 'SPEED',
-    description: 'RWD highway missile. Slippery shape and long legs — the top-speed king.',
-    specs: { mass: 1550, power: 272, peakTorque: 420, redline: 7500, driveType: 'RWD', dragCoefficient: 0.31, downforceMultiplier: 0.12, weightDistribution: 0.53, baseGrip: 0.87, brakes: 1.4, gearRatios: [3.83, 2.36, 1.69, 1.31, 1.0, 0.79], finalDrive: 3.27 }
+    description: 'RWD highway missile — the outright top-speed king thanks to a slippery shape and long legs. But it is heavy and modest on grip, so it dominates fast open tracks and struggles through a tight, technical one.',
+    specs: { mass: 1520, power: 360, peakTorque: 500, redline: 7600, driveType: 'RWD', dragCoefficient: 0.29, downforceMultiplier: 0.10, weightDistribution: 0.53, baseGrip: 0.87, brakes: 1.40, gearRatios: [3.30, 2.40, 1.86, 1.47, 1.19, 0.99, 0.83, 0.70], finalDrive: 3.27 }
   },
   {
     id: 'nsx', name: 'NSX Type-R', class: 'GRIP',
-    description: 'Mid-engine RWD scalpel. Less muscle, most grip — carries speed nothing else can.',
-    specs: { mass: 1270, power: 212, peakTorque: 260, redline: 8300, driveType: 'RWD', dragCoefficient: 0.3, downforceMultiplier: 0.3, weightDistribution: 0.42, baseGrip: 0.96, brakes: 1.6, gearRatios: [3.07, 1.96, 1.46, 1.12, 0.92, 0.75], finalDrive: 4.06 }
+    description: 'Mid-engine RWD scalpel with the highest grip on the grid — it carries corner speed nothing else can and brakes impossibly late. It gives away power and top speed, so it lives to devour a twisty circuit.',
+    specs: { mass: 1260, power: 300, peakTorque: 300, redline: 8400, driveType: 'RWD', dragCoefficient: 0.30, downforceMultiplier: 0.30, weightDistribution: 0.44, baseGrip: 0.97, brakes: 1.60, gearRatios: [3.07, 2.25, 1.72, 1.36, 1.10, 0.92, 0.79, 0.68], finalDrive: 4.06 }
   },
   {
     id: 'f40', name: 'F40 Twin-Turbo', class: 'SPEED',
-    description: 'Raw, savage, analog. Light, low-drag wedge that rewards commitment.',
-    specs: { mass: 1250, power: 226, peakTorque: 320, redline: 7750, driveType: 'RWD', dragCoefficient: 0.34, downforceMultiplier: 0.45, weightDistribution: 0.43, baseGrip: 0.89, brakes: 1.7, gearRatios: [3.1, 2.1, 1.6, 1.25, 1.03], finalDrive: 3.9 }
+    description: 'Savage power-to-weight in a light, low-drag wedge — brutally fast when you commit. The price is a razor edge: a rear-biased, boost-happy chassis that will snap on you the instant you get greedy.',
+    specs: { mass: 1230, power: 400, peakTorque: 500, redline: 7800, driveType: 'RWD', dragCoefficient: 0.34, downforceMultiplier: 0.45, weightDistribution: 0.43, baseGrip: 0.90, brakes: 1.70, gearRatios: [3.10, 2.25, 1.72, 1.36, 1.10, 0.90, 0.70], finalDrive: 3.90 }
   },
   {
     id: 'cgt', name: 'Carrera GT', class: 'GRIP',
-    description: 'Screaming NA V10, carbon tub, RWD, uncompromising precision.',
-    specs: { mass: 1380, power: 240, peakTorque: 330, redline: 8400, driveType: 'RWD', dragCoefficient: 0.39, downforceMultiplier: 0.4, weightDistribution: 0.48, baseGrip: 0.94, brakes: 1.8, gearRatios: [3.2, 1.87, 1.41, 1.13, 0.93, 0.79], finalDrive: 4.44 }
+    description: 'A screaming NA V10 with a carbon tub — huge grip AND huge power, a 9-speed surgical instrument. But its peaky, high-rev delivery gives nothing down low: bog it below the powerband and it simply will not pull.',
+    specs: { mass: 1360, power: 400, peakTorque: 400, redline: 8500, driveType: 'RWD', dragCoefficient: 0.39, downforceMultiplier: 0.40, weightDistribution: 0.48, baseGrip: 0.96, brakes: 1.80, gearRatios: [3.20, 2.40, 1.90, 1.55, 1.28, 1.07, 0.91, 0.79, 0.70], finalDrive: 4.10 }
   },
   {
     id: 'sv12', name: 'Aventador SV', class: 'GRIP',
-    description: 'V12 AWD bruiser. Planted like nothing else — grip and stability over raw shove.',
-    specs: { mass: 1525, power: 258, peakTorque: 400, redline: 8500, driveType: 'AWD', dragCoefficient: 0.36, downforceMultiplier: 0.55, weightDistribution: 0.43, baseGrip: 0.95, brakes: 2.0, gearRatios: [2.9, 2.0, 1.5, 1.18, 0.97, 0.82, 0.7], finalDrive: 3.9 }
+    description: 'The apex predator: the most power, the most downforce and monster AWD grip, glued to fast sweepers. It is also the heaviest car here, so a tight, low-speed corner is the one place its bulk finally counts against it.',
+    specs: { mass: 1560, power: 430, peakTorque: 560, redline: 8500, driveType: 'AWD', dragCoefficient: 0.36, downforceMultiplier: 0.55, weightDistribution: 0.43, baseGrip: 0.96, brakes: 2.0, gearRatios: [2.95, 2.25, 1.80, 1.48, 1.24, 1.05, 0.90, 0.79, 0.70], finalDrive: 3.90 }
   }
 ];
 

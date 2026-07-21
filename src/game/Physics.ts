@@ -309,10 +309,14 @@ export function updateVehicle(
   const clutchlessH = res.gearbox === 'manual' && !inputs.clutch;
   state.missedShift = false; state.overRev = 0;
 
+  // Faster shifts across the board (2026-07-21) so gear changes feel snappy and
+  // the drive barely interrupts — the relative ordering is preserved so the
+  // gearbox choice still matters: DCT fastest, a well-timed clutched manual next,
+  // then sequential, then auto, and a fumbled clutchless H-pattern still hangs.
   const shiftLag =
-    res.gearbox === 'dct' ? 0.06 :
-    res.gearbox === 'sequential' ? 0.14 :
-    res.gearbox === 'manual' ? (inputs.clutch ? 0.08 : 0.42) : 0.24;
+    res.gearbox === 'dct' ? 0.04 :
+    res.gearbox === 'sequential' ? 0.09 :
+    res.gearbox === 'manual' ? (inputs.clutch ? 0.06 : 0.34) : 0.17;
 
   if (!isElectric && state.clutchTimer <= 0) {
     let up = false, down = false;

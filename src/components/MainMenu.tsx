@@ -177,12 +177,12 @@ export const MainMenu: React.FC<MainMenuProps> = ({ onOpenGarage }) => {
                 <div className="car-stats-bars">
                   <div className="stat-row">
                     <span>POWER</span>
-                    <div className="bar-bg"><div className="bar-fill" style={{ width: `${Math.min(100, (activeCar.specs.power / 290) * 100)}%` }}></div></div>
+                    <div className="bar-bg"><div className="bar-fill" style={{ width: `${Math.min(100, (activeCar.specs.power / 450) * 100)}%` }}></div></div>
                     <span>{activeCar.specs.power} hp</span>
                   </div>
                   <div className="stat-row">
                     <span>TORQUE</span>
-                    <div className="bar-bg"><div className="bar-fill" style={{ width: `${Math.min(100, (activeCar.specs.peakTorque / 440) * 100)}%` }}></div></div>
+                    <div className="bar-bg"><div className="bar-fill" style={{ width: `${Math.min(100, (activeCar.specs.peakTorque / 570) * 100)}%` }}></div></div>
                     <span>{activeCar.specs.peakTorque} Nm</span>
                   </div>
                   <div className="stat-row">
