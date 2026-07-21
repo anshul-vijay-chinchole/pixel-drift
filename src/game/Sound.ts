@@ -20,7 +20,15 @@ export class SoundEngine {
   // Ambient nodes
   private envNoise: ScriptProcessorNode | null = null;
   private envGain: GainNode | null = null;
-  
+
+  // Opponent engine voices — one lightweight (single-oscillator) voice per
+  // nearby AI car, lazily created and pooled by opponent id. Deliberately
+  // simpler than the player's 3-oscillator+distortion rig: with up to 9
+  // rivals on track, a full player-quality voice per car would be 50+ nodes
+  // running continuously for background traffic noise most players won't
+  // consciously distinguish car-by-car.
+  private oppVoices: Map<string, { osc: OscillatorNode; filter: BiquadFilterNode; gain: GainNode }> = new Map();
+
   private isMuted: boolean = false;
   private active: boolean = false;
 
@@ -225,6 +233,71 @@ export class SoundEngine {
     }
   }
 
+  // Beyond this range an opponent is inaudible, so we neither create nor
+  // update its voice — most of a spread-out grid, most of the time, costs
+  // nothing.
+  private static readonly OPP_AUDIBLE_RANGE = 70;
+
+  private ensureOppVoice(id: string): { osc: OscillatorNode; filter: BiquadFilterNode; gain: GainNode } {
+    const ctx = this.ctx!;
+    const osc = ctx.createOscillator();
+    osc.type = 'sawtooth';
+    osc.frequency.setValueAtTime(34, ctx.currentTime);
+
+    const filter = ctx.createBiquadFilter();
+    filter.type = 'lowpass';
+    filter.frequency.setValueAtTime(280, ctx.currentTime);
+    filter.Q.setValueAtTime(1.2, ctx.currentTime);
+
+    const gain = ctx.createGain();
+    gain.gain.setValueAtTime(0, ctx.currentTime);
+
+    osc.connect(filter);
+    filter.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start(0);
+
+    const voice = { osc, filter, gain };
+    this.oppVoices.set(id, voice);
+    return voice;
+  }
+
+  // Called once per opponent per frame from the race loop with that car's
+  // rpm/redline/throttle and its distance (m) to the player.
+  public updateOpponent(id: string, rpm: number, redline: number, throttle: number, distance: number) {
+    if (!this.active || this.isMuted || !this.ctx) return;
+    const existing = this.oppVoices.get(id);
+    if (distance > SoundEngine.OPP_AUDIBLE_RANGE) {
+      // Fade out (don't just cut) so a car crossing the audible boundary
+      // doesn't click off — but don't bother creating a voice just to fade
+      // one that was never audible.
+      if (existing) existing.gain.gain.setTargetAtTime(0, this.ctx.currentTime, 0.15);
+      return;
+    }
+    const voice = existing ?? this.ensureOppVoice(id);
+    const t = this.ctx.currentTime;
+    const rpmPct = Math.max(0, Math.min(1, redline > 0 ? rpm / redline : 0));
+    const atten = Math.max(0, 1 - distance / SoundEngine.OPP_AUDIBLE_RANGE);
+    // Quieter than the player's own engine (base 0.22) so a pack of rivals
+    // reads as background traffic, not competing lead engines.
+    const targetGain = 0.11 * atten * (0.35 + 0.65 * rpmPct) * (0.5 + 0.5 * Math.max(0, Math.min(1, throttle)));
+    voice.gain.gain.setTargetAtTime(targetGain, t, 0.12);
+    voice.osc.frequency.setTargetAtTime(34 + 170 * rpmPct, t, 0.08);
+    voice.filter.frequency.setTargetAtTime(280 + 900 * rpmPct, t, 0.08);
+  }
+
+  // Tear down every pooled opponent voice — call when leaving/restarting a
+  // race so a car that despawns mid-volume doesn't leave a phantom engine
+  // note stuck playing (or a stale id silently never updated again if the
+  // next race has fewer opponents).
+  public clearOpponents() {
+    for (const v of this.oppVoices.values()) {
+      try { v.osc.stop(); v.osc.disconnect(); v.filter.disconnect(); v.gain.disconnect(); }
+      catch { /* already stopped/disconnected */ }
+    }
+    this.oppVoices.clear();
+  }
+
   public triggerBackfire() {
     if (!this.active || this.isMuted || !this.ctx) return;
     const t = this.ctx.currentTime;
@@ -313,6 +386,7 @@ export class SoundEngine {
       if (this.turboGain) this.turboGain.gain.value = 0;
       if (this.tireGain) this.tireGain.gain.value = 0;
       if (this.envGain) this.envGain.gain.value = 0;
+      for (const v of this.oppVoices.values()) v.gain.gain.value = 0;
     } else {
       // Restore the ambient wind bed — engine/turbo/tire re-ramp themselves in
       // update(), but envGain is only set here, so without this it stayed silent

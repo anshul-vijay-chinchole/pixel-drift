@@ -373,7 +373,10 @@ export class GameGraphics {
     for (let i = 0; i < this.smokeMax; i++) { this.smokePos[i * 3 + 1] = -999; }
     this.smokeGeo.setAttribute('position', new THREE.BufferAttribute(this.smokePos, 3));
     this.smokeGeo.setAttribute('color', new THREE.BufferAttribute(this.smokeColor, 3));
-    this.smoke = new THREE.Points(this.smokeGeo, new THREE.PointsMaterial({ size: 1.2, transparent: true, opacity: 0.35, vertexColors: true, depthWrite: false }));
+    // Opacity cut 0.35 -> 0.14 (60% reduction, exactly): shared by every emitSmoke()
+    // call site (drift/slide smoke AND damaged-engine smoke both draw from this one
+    // material), so both requested sources drop together.
+    this.smoke = new THREE.Points(this.smokeGeo, new THREE.PointsMaterial({ size: 1.2, transparent: true, opacity: 0.14, vertexColors: true, depthWrite: false }));
     this.smoke.frustumCulled = false;
     this.scene.add(this.smoke);
   }

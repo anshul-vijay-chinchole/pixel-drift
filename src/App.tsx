@@ -28,6 +28,7 @@ export const App: React.FC = () => {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const gfxRef = useRef<GameGraphics | null>(null);
   const rafRef = useRef<number>(0);
+  const restartTimeoutRef = useRef<number | null>(null); // doRestart's pending launchRace(), so doExit can cancel it
 
   const playerRef = useRef<VehicleState | null>(null);
   const oppsRef = useRef<OpponentRacer[]>([]);
@@ -167,8 +168,9 @@ export const App: React.FC = () => {
     lastGearRef.current = 1;
     lastBoostRef.current = 0; // avoid a spurious blow-off "pshhh" on the next race's countdown
 
+    sound.clearOpponents(); // drop any pooled voices from a previous race before spawning this one's
     oppsRef.current = oppCount > 0
-      ? AIEngine.spawnOpponents(oppCount, tp, cars, config.difficulty, trackDef.isClosed, slots.slice(1), carDef.specs.power) : [];
+      ? AIEngine.spawnOpponents(oppCount, tp, cars, config.difficulty, trackDef.isClosed, slots.slice(1), carDef.specs.power, config.weather) : [];
     lastAiIdx.current = {};
     aiPassedHalf.current = {};
     oppsRef.current.forEach(o => { lastAiIdx.current[o.id] = o.currentTrackIndex; aiPassedHalf.current[o.id] = true; });
@@ -374,6 +376,13 @@ export const App: React.FC = () => {
     // Driveline misuse feedback (per-frame events set by the physics gearbox).
     if (p.missedShift) { sound.triggerBackfire(); showToast('⚙ GEARS GROUND — HOLD SHIFT (CLUTCH)'); }
     if (p.overRev > 0.08) { sound.triggerBackfire(); gfx.triggerBackfirePop(); showToast('💥 OVER-REV! ENGINE DAMAGED'); }
+    // Opponent engine sounds — distance-attenuated background traffic noise.
+    if (racing) {
+      oppsRef.current.forEach(o => {
+        const dist = Math.hypot(o.state.x - p.x, o.state.z - p.z);
+        sound.updateOpponent(o.id, o.state.engineRpm, o.carDef.specs.redline, o.inputs.throttle, dist);
+      });
+    }
 
     // ---- timing / laps ----
     if (racing) { raceTimeRef.current += dt; lapTimeRef.current += dt; }
@@ -492,6 +501,14 @@ export const App: React.FC = () => {
     const config = cfgRef.current!; const p = playerRef.current!;
     setPhaseBoth('finished');
     cancelAnimationFrame(rafRef.current);
+    // The tick loop (and with it, every sound.update()/updateOpponent() call)
+    // stops dead here — without muting, the engine/turbo/tire/opponent gain
+    // nodes are frozen at their last-commanded (non-zero) volume and drone on
+    // under the summary screen until the player clicks CONTINUE. doExit and
+    // claimPayout already do this; finishRace (the normal, every-race end
+    // path) was missing it — found by adversarial review.
+    sound.setMute(true);
+    sound.clearOpponents();
     replayRef.current.stopRecording();
 
     const place = posRef.current;
@@ -513,13 +530,19 @@ export const App: React.FC = () => {
     else exitRace();
     gfxRef.current?.dispose(); gfxRef.current = null;
     sound.setMute(true);
+    sound.clearOpponents();
     setScreen('menu');
   };
 
   const doExit = () => {
+    // Cancel a pending doRestart() launch, if any — see the comment there for
+    // the phantom-race scenario this prevents (Restart then Quit within the
+    // 60ms gap).
+    if (restartTimeoutRef.current !== null) { window.clearTimeout(restartTimeoutRef.current); restartTimeoutRef.current = null; }
     setPhaseBoth('finished');
     cancelAnimationFrame(rafRef.current);
     sound.setMute(true);
+    sound.clearOpponents();
     exitRace();
     gfxRef.current?.dispose(); gfxRef.current = null;
     setScreen('menu');
@@ -530,7 +553,15 @@ export const App: React.FC = () => {
     if (!cfg) return;
     setPhaseBoth('finished'); // stops old loop
     setPlayerHUD(null); // hide the old race's HUD during the 60ms restart gap
-    window.setTimeout(() => launchRace(cfg), 60);
+    // Untracked before (found by adversarial review): Restart then Quit within
+    // this 60ms window left the timeout firing AFTER doExit had already torn
+    // down the race — since containerRef's div is only CSS-hidden, never
+    // unmounted, launchRace's guard didn't stop it, so a full phantom race
+    // (physics ticking, opponents spawned, audio unmuted) started running
+    // invisibly behind the main menu. Tracking + cancelling it in doExit fixes
+    // that race condition.
+    if (restartTimeoutRef.current !== null) window.clearTimeout(restartTimeoutRef.current);
+    restartTimeoutRef.current = window.setTimeout(() => { restartTimeoutRef.current = null; launchRace(cfg); }, 60);
   };
 
   const toggleMute = () => {
@@ -603,7 +634,7 @@ export const App: React.FC = () => {
                 <input
                   type="range"
                   min={0.7}
-                  max={1.6}
+                  max={3.0}
                   step={0.05}
                   value={stats.steerSensitivity}
                   onChange={e => setSteerSensitivity(Number(e.target.value))}
@@ -612,7 +643,7 @@ export const App: React.FC = () => {
                 <span className="sens-value">{Math.round(stats.steerSensitivity * 100)}%</span>
               </div>
               <div className="sens-hint">
-                <span>Numb / Safe</span><span>Default</span><span>Sharp / Twitchy</span>
+                <span>Numb / Safe</span><span>Default</span><span>Sharp</span><span>Extreme / Twitchy</span>
               </div>
             </div>
             <div className="controls-ref">

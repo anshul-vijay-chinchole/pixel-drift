@@ -176,7 +176,7 @@ export interface PlayerStats {
   rallyRating: number;
   garage: Record<string, CarLoadout>;
   activeCarId: string;
-  steerSensitivity: number; // Settings slider (0.7-1.6, default 1.0) — scales steering lock + the assist's yaw ceiling, uniformly for every car
+  steerSensitivity: number; // Settings slider (0.7-3.0, default 1.0) — scales steering lock + the assist's yaw ceiling, uniformly for every car
 }
 
 export type TrackId = 'circuit' | 'highway' | 'drag' | 'rally' | 'city' | 'canyon' | 'oval' | 'seaside' | 'apex';
@@ -186,17 +186,22 @@ export type RaceMode = 'circuit' | 'touge' | 'sprint' | 'drag' | 'drift' | 'free
 // 7 difficulty tiers — a smooth skill ramp (each is ~1 driver-skill notch) with
 // matching payout scaling. Single source of truth for AI, payouts and the menu.
 export type Difficulty = 'novice' | 'rookie' | 'amateur' | 'semipro' | 'pro' | 'expert' | 'legend' | 'impossible';
-// 8 difficulty tiers. Skills raised ~30-40% vs the old ramp — every tier is
-// harder now. 'impossible' (skill >1) drives flawlessly beyond the grip limit.
+// 8 difficulty tiers. Every tier bumped again (2026-07-21) — larger increment
+// at the top so the hardest tiers feel meaningfully harder, smaller at the
+// bottom so Novice stays approachable. 'impossible' (skill >1) drives
+// flawlessly beyond the grip limit. NOTE: the spawn-time skill clamp (1.38)
+// and perfBoost cap (1.62) in AI.ts were BOTH already saturating near the old
+// top skill values — raised alongside this table (see AI.ts), otherwise a
+// skill-table bump alone would silently no-op for the hardest tiers.
 export const DIFFICULTIES: { id: Difficulty; label: string; skill: number; payout: number; blurb: string }[] = [
-  { id: 'novice',     label: 'Novice',     skill: 0.80, payout: 0.85, blurb: 'Quick, occasional slips' },
-  { id: 'rookie',     label: 'Rookie',     skill: 0.86, payout: 1.00, blurb: 'Fast and consistent' },
-  { id: 'amateur',    label: 'Amateur',    skill: 0.91, payout: 1.15, blurb: 'Seriously challenging' },
-  { id: 'semipro',    label: 'Semi-Pro',   skill: 0.95, payout: 1.30, blurb: 'Very fast, defends hard' },
-  { id: 'pro',        label: 'Pro',        skill: 0.99, payout: 1.50, blurb: 'On the ragged edge' },
-  { id: 'expert',     label: 'Expert',     skill: 1.04, payout: 1.75, blurb: 'Relentless, near-flawless' },
-  { id: 'legend',     label: 'Legend',     skill: 1.12, payout: 2.10, blurb: 'Flawless and merciless' },
-  { id: 'impossible', label: 'Impossible', skill: 1.32, payout: 2.80, blurb: 'Superhuman — beyond the limit' },
+  { id: 'novice',     label: 'Novice',     skill: 0.84, payout: 0.85, blurb: 'Quick, occasional slips' },
+  { id: 'rookie',     label: 'Rookie',     skill: 0.90, payout: 1.00, blurb: 'Fast and consistent' },
+  { id: 'amateur',    label: 'Amateur',    skill: 0.96, payout: 1.15, blurb: 'Seriously challenging' },
+  { id: 'semipro',    label: 'Semi-Pro',   skill: 1.01, payout: 1.30, blurb: 'Very fast, defends hard' },
+  { id: 'pro',        label: 'Pro',        skill: 1.06, payout: 1.50, blurb: 'On the ragged edge' },
+  { id: 'expert',     label: 'Expert',     skill: 1.13, payout: 1.75, blurb: 'Relentless, near-flawless' },
+  { id: 'legend',     label: 'Legend',     skill: 1.22, payout: 2.10, blurb: 'Flawless and merciless' },
+  { id: 'impossible', label: 'Impossible', skill: 1.45, payout: 2.80, blurb: 'Superhuman — beyond the limit' },
 ];
 export const difficultySkill = (d: string): number => (DIFFICULTIES.find(x => x.id === d)?.skill ?? 0.7);
 export const difficultyPayout = (d: string): number => (DIFFICULTIES.find(x => x.id === d)?.payout ?? 1.0);
@@ -389,7 +394,7 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const setSteerSensitivity = (v: number) => {
-    const clamped = Math.max(0.7, Math.min(1.6, v));
+    const clamped = Math.max(0.7, Math.min(3.0, v));
     setStats(prev => ({ ...prev, steerSensitivity: clamped }));
   };
 

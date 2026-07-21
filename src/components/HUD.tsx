@@ -106,6 +106,20 @@ export const HUD: React.FC<HUDProps> = ({
   const tireClass = (w: { temp: number; wear: number; isPunctured: boolean }) =>
     w.isPunctured ? 'tire-punctured' : w.temp > 108 ? 'tire-hot' : w.wear > 0.6 ? 'tire-worn' : 'tire-good';
 
+  // Engine health % is the inverse of overall damage (the same stat that
+  // already drives torque loss / misfire chance / brake loss in Physics.ts —
+  // "engine health" here means "how much of the car's mechanical health is
+  // left", not a separate tracked value). Colour thresholds mirror the tire
+  // boxes: good / worn / hot / critical.
+  const engineHealthPct = Math.round((1 - playerState.damage) * 100);
+  const engineHealthClass =
+    playerState.damage > 0.6 ? 'engine-critical' : playerState.damage > 0.3 ? 'engine-worn' : 'engine-good';
+  // 118°C is the exact threshold where Physics.ts starts accruing thermal
+  // damage every frame — matching it here means the HUD turns hot right when
+  // the car is actually taking heat damage, not on an arbitrary separate cutoff.
+  const engineTempClass =
+    playerState.engineTemp > 118 ? 'engine-hot' : playerState.engineTemp > 105 ? 'engine-worn' : 'engine-good';
+
   const TACH_TICKS = 20;
 
   return (
@@ -158,20 +172,39 @@ export const HUD: React.FC<HUDProps> = ({
         <div className="damage-alert"><span className="blink text-red">⚠</span><span>DAMAGE {Math.floor(playerState.damage * 100)}%</span></div>
       )}
 
-      {/* Bottom-left: tires */}
-      <div className="hud-card tire-panel">
-        <label>TYRES  °C / WEAR</label>
-        <div className="tires-grid">
-          {(['fl', 'fr', 'rl', 'rr'] as const).map(key => {
-            const w = playerState.wheels[key];
-            return (
-              <div key={key} className={`tire-box ${tireClass(w)}`}>
-                <span>{key.toUpperCase()}</span>
-                <span>{Math.floor(w.temp)}°</span>
-                <span>{Math.floor(w.wear * 100)}%</span>
-              </div>
-            );
-          })}
+      {/* Bottom-left: engine (above) + tires — wrapped together so this whole
+          stack is the single non-absolute "bottom" flow child of hud-overlay
+          (see App.css .bottom-left-stack), matching the layout trick that
+          already puts top-left-panel at the top and this stack at the bottom. */}
+      <div className="bottom-left-stack">
+        <div className="hud-card engine-panel">
+          <label>ENGINE</label>
+          <div className="engine-grid">
+            <div className={`engine-box ${engineHealthClass}`}>
+              <span>HEALTH</span>
+              <span className="engine-value">{engineHealthPct}%</span>
+            </div>
+            <div className={`engine-box ${engineTempClass}`}>
+              <span>TEMP</span>
+              <span className="engine-value">{Math.floor(playerState.engineTemp)}°</span>
+            </div>
+          </div>
+        </div>
+
+        <div className="hud-card tire-panel">
+          <label>TYRES  °C / WEAR</label>
+          <div className="tires-grid">
+            {(['fl', 'fr', 'rl', 'rr'] as const).map(key => {
+              const w = playerState.wheels[key];
+              return (
+                <div key={key} className={`tire-box ${tireClass(w)}`}>
+                  <span>{key.toUpperCase()}</span>
+                  <span>{Math.floor(w.temp)}°</span>
+                  <span>{Math.floor(w.wear * 100)}%</span>
+                </div>
+              );
+            })}
+          </div>
         </div>
       </div>
 

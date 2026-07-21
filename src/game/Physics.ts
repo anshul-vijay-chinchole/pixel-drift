@@ -110,6 +110,13 @@ export const ROAD_SURFACES: Record<string, { grip: number; drag: number; roughne
   curb: { grip: 0.95, drag: 1.0, roughness: 0.8 }
 };
 
+// Global durability multiplier on every damage-accrual site below (driveline
+// grinding/over-rev/lugging/overheat here, plus wall/traffic/car-car collision
+// in resolveCollision/resolveCarPair) — cars take meaningfully longer to reach
+// a given damage% so they don't get chewed up early in a race. 1.0 = original
+// rates; 0.45 means roughly 2.2x the effective "health" at every damage source.
+export const DAMAGE_SCALE = 0.45;
+
 /* ============================================================================
  * LOADOUT RESOLUTION — every attachment maps to physics deltas here.
  * ==========================================================================*/
@@ -252,10 +259,10 @@ export function updateVehicle(
   carDef: CarDefinition,
   loadout: CarLoadout,
   perfBoost = 1, // AI difficulty bonus: >1 scales grip + power (player always 1)
-  steerSensitivity = 1 // player-facing Settings slider (0.7-1.6); AI always 1
+  steerSensitivity = 1 // player-facing Settings slider (0.7-3.0); AI always 1
 ): void {
   if (dt <= 0) return;
-  const sensitivity = Math.max(0.7, Math.min(1.6, steerSensitivity));
+  const sensitivity = Math.max(0.7, Math.min(3.0, steerSensitivity));
   if (dt > 0.05) dt = 0.05;
 
   const spec = carDef.specs;
@@ -325,10 +332,10 @@ export function updateVehicle(
       if (Math.random() < grindChance) {
         state.missedShift = true;
         state.clutchTimer = 0.55;                          // baulked — driveline hangs, no drive
-        state.damage = Math.min(1, state.damage + 0.02);
+        state.damage = Math.min(1, state.damage + 0.02 * DAMAGE_SCALE);
         up = down = false;
       } else {
-        state.damage = Math.min(1, state.damage + 0.004);  // synchro wear even on a clean one
+        state.damage = Math.min(1, state.damage + 0.004 * DAMAGE_SCALE);  // synchro wear even on a clean one
       }
     }
 
@@ -347,7 +354,7 @@ export function updateVehicle(
       if (canOverRev && impliedRpm > redline * 1.05) {
         const over = (impliedRpm - redline) / redline;
         state.overRev = over;
-        state.damage = Math.min(1, state.damage + Math.min(0.5, over * 0.4));
+        state.damage = Math.min(1, state.damage + Math.min(0.5, over * 0.4) * DAMAGE_SCALE);
       }
       state.activeGear--; state.clutchTimer = shiftLag;
     }
@@ -737,9 +744,9 @@ export function updateVehicle(
   // low-rpm torque hole. Short-shift sensibly or drop a gear.
   if (!isElectric && !clutched && state.activeGear > 1 && throttle > 0.4 && state.engineRpm < redline * 0.2 && Math.abs(state.vx) > 1) {
     state.engineTemp = Math.min(130, state.engineTemp + dt * 1.6);
-    state.damage = Math.min(1, state.damage + dt * 0.004);
+    state.damage = Math.min(1, state.damage + dt * 0.004 * DAMAGE_SCALE);
   }
-  if (state.engineTemp > 118) state.damage = Math.min(1, state.damage + dt * 0.012);
+  if (state.engineTemp > 118) state.damage = Math.min(1, state.damage + dt * 0.012 * DAMAGE_SCALE);
 }
 
 // Collision resolution. `nx,nz` = world-space normal pointing away from the
@@ -760,7 +767,7 @@ export function resolveCollision(state: VehicleState, nx: number, nz: number, im
   state.yawRate *= 0.6;
 
   if (impactSpeed > 6) {
-    const dmg = (impactSpeed - 6) * 0.02;
+    const dmg = (impactSpeed - 6) * 0.02 * DAMAGE_SCALE;
     state.damage = Math.min(1, state.damage + dmg);
     // NOTE: damage no longer pulls the steering to one side or punctures a
     // single tyre — those made the car veer/tilt off in a direction. Damage
@@ -816,8 +823,8 @@ export function resolveCarPair(a: VehicleState, b: VehicleState, massA: number, 
   a.yawRate *= 0.8; b.yawRate *= 0.8;
   const impact = -relN;
   if (impact > 6) {
-    a.damage = Math.min(1, a.damage + (impact - 6) * 0.02 * (massB / (massA + massB)));
-    b.damage = Math.min(1, b.damage + (impact - 6) * 0.02 * (massA / (massA + massB)));
+    a.damage = Math.min(1, a.damage + (impact - 6) * 0.02 * DAMAGE_SCALE * (massB / (massA + massB)));
+    b.damage = Math.min(1, b.damage + (impact - 6) * 0.02 * DAMAGE_SCALE * (massA / (massA + massB)));
   }
   return impact;
 }

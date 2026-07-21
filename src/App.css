@@ -602,6 +602,50 @@ body {
   margin-bottom: 4px;
 }
 
+/* Bottom-left stack: engine panel above the tire panel. This wrapper is the
+   single non-absolute flow child that replaces tire-panel's old role, so
+   .hud-overlay's flex column + justify-content:space-between still puts
+   top-left-panel at the top and this whole stack at the bottom. */
+.bottom-left-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  align-items: flex-start;
+}
+
+/* Engine health + stats */
+.engine-panel {
+  width: 190px;
+  font-size: 0.65rem;
+}
+
+.engine-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.engine-box {
+  background: rgba(255,255,255,0.05);
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 2px;
+  padding: 6px 4px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  font-family: var(--font-mono);
+}
+
+.engine-box > span:first-child { font-size: 0.58rem; color: rgba(255,255,255,0.5); }
+.engine-value { font-size: 0.95rem; font-weight: 700; }
+
+.engine-good { border-left: 3px solid var(--color-neon-cyan); }
+.engine-worn { border-left: 3px solid var(--color-neon-yellow); }
+.engine-hot { border-left: 3px solid #f77f00; animation: blink 0.5s infinite; }
+.engine-critical { border-left: 3px solid #d62828; animation: blink 0.25s infinite; }
+
 /* Tires grid */
 .tire-panel {
   width: 190px;

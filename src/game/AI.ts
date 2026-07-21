@@ -1,6 +1,13 @@
 import { VehicleState, UserInputs, updateVehicle, initVehicleState } from './Physics';
 import { TrackPoint, TrackBuilder, groundHeight, roadHeightAt } from './World';
-import { CarDefinition, CarLoadout, DEFAULT_LOADOUT, Difficulty, difficultySkill } from '../context/GameContext';
+import { CarDefinition, CarLoadout, DEFAULT_LOADOUT, Difficulty, difficultySkill, WeatherType } from '../context/GameContext';
+
+// Physically-motivated corner/braking grip multiplier per weather, used to
+// scale the AI's PRECOMPUTED speed profile (see computeSpeedProfile) so wet
+// races give the AI a profile that assumes the grip it actually has, not dry
+// grip. Fog/night don't reduce a bot's PHYSICAL grip (no visibility penalty
+// applies to code reading track data directly), so they stay at 1.
+const weatherGripMult = (weather: string): number => (weather === 'rainy' || weather === 'snowy' ? 0.75 : 1);
 
 export type AIProfile = 'aggressive' | 'defensive' | 'pro' | 'rookie' | 'drifter';
 
@@ -50,14 +57,19 @@ function aiLoadout(profile: AIProfile): CarLoadout {
 // Precompute a braking-aware corner-speed profile for the whole track:
 // forward pass caps by curvature; backward passes propagate braking distances
 // so the AI slows BEFORE corners instead of sailing past the apex.
-export function computeSpeedProfile(tp: TrackPoint[], isClosed: boolean): number[] {
+// `gripMult` (see weatherGripMult) scales BOTH the cornering and braking
+// budget so a wet-race profile bakes in reduced grip at its source, instead of
+// a flat pace multiplier applied on top of a profile computed as if it were
+// always dry — the old approach let the AI arrive at corners assuming dry
+// braking distances even in the rain, so it overshot and ran wide.
+export function computeSpeedProfile(tp: TrackPoint[], isClosed: boolean, gripMult = 1): number[] {
   const n = tp.length;
   const totalLen = tp[n - 1].dist || 1;
   const ds = Math.max(1.5, totalLen / n);
   // Real grip (muBase ~1.32) supports far more than this, so raising the AI's
   // usable lateral/braking makes them corner & brake harder without overshooting.
-  const aLat = 11.2;  // m/s² usable lateral accel — near the real grip limit
-  const aBrake = 10.0; // m/s² braking decel — brakes very late
+  const aLat = 11.2 * gripMult;  // m/s² usable lateral accel — near the real grip limit
+  const aBrake = 10.0 * gripMult; // m/s² braking decel — brakes very late
 
   const v: number[] = new Array(n);
   for (let i = 0; i < n; i++) {
@@ -106,7 +118,8 @@ export class AIEngine {
     difficulty: Difficulty,
     isClosed = true,
     slots: number[] = [],
-    playerPower = 250
+    playerPower = 250,
+    weather: WeatherType = 'sunny'
   ): OpponentRacer[] {
     const profiles: AIProfile[] = ['pro', 'aggressive', 'defensive', 'drifter', 'rookie'];
     const opponents: OpponentRacer[] = [];
@@ -116,12 +129,20 @@ export class AIEngine {
     const byPower = [...carDb].sort((a, b) => Math.abs(a.specs.power - playerPower) - Math.abs(b.specs.power - playerPower));
     const pool = byPower.slice(0, Math.max(count, Math.min(carDb.length, 6))).sort(() => Math.random() - 0.5);
 
-    const profile = computeSpeedProfile(trackPoints, isClosed);
+    const profile = computeSpeedProfile(trackPoints, isClosed, weatherGripMult(weather));
 
     for (let i = 0; i < count; i++) {
       const persona = profiles[i % profiles.length];
       const carDef = pool[i % pool.length];
-      const skill = Math.min(1.38, Math.max(0.4,
+      // Clamp ceiling raised 1.38 -> 1.55 -> 1.7 (2026-07-21, second pass per
+      // adversarial review): the 1.55 value only left ~2.3% headroom over the
+      // actual worst-case roll (Impossible 1.45 + pro persona 0.04 + max jitter
+      // 0.025 = 1.515) — thin enough that the NEXT difficulty bump could
+      // silently re-saturate it, exactly the bug this ceiling exists to avoid.
+      // 1.7 gives real margin (~12%) without changing today's actual values
+      // (still well under the ceiling, so behavior at current skill values is
+      // unchanged — this only affects future headroom).
+      const skill = Math.min(1.7, Math.max(0.4,
         skill0 + (Math.random() - 0.5) * 0.05 + (persona === 'pro' ? 0.04 : persona === 'rookie' ? -0.05 : 0)));
       // Performance "bonus": higher tiers get faster machinery (more grip+power),
       // so they genuinely pull away — the way you make racing AI hard once their
@@ -129,7 +150,9 @@ export class AIEngine {
       // ×1.2 (cap raised to match): rivals run a 20% bigger car-performance edge
       // across EVERY tier — sqrt(perfBoost) feeds corner speed AND the top-speed
       // cap, so this is a genuine across-the-board pace gain, not a knob tweak.
-      const perfBoost = Math.min(1.62, (1.06 + Math.max(0, skill - 0.78) * 0.52) * 1.2);
+      // Cap 1.62 -> 1.85 -> 2.1 (2026-07-21, same headroom pass): same thin-
+      // margin concern as the skill clamp above (only ~3.6% headroom at 1.85).
+      const perfBoost = Math.min(2.1, (1.06 + Math.max(0, skill - 0.78) * 0.58) * 1.2);
 
       const g = gridSpawn(trackPoints, isClosed, slots[i] ?? (i + 1));
       const state = initVehicleState(carDef);
@@ -195,8 +218,24 @@ export class AIEngine {
     // sqrt(perfBoost): their boosted grip lets them corner this much faster at
     // the SAME safety margin (grip x boost, speed^2 x boost -> ratio unchanged).
     const boostSp = Math.sqrt(ai.perfBoost);
-    const paceMult = Math.min(1.04, 0.84 + ai.skill * 0.24)
-      * (isWet ? 0.82 : 1)
+    // NOTE: weather grip is now baked into ai.speedProfile itself (see
+    // weatherGripMult / computeSpeedProfile) — both the cornering AND the
+    // BRAKING distances the profile assumes are already reduced for wet
+    // races, so the AI actually starts slowing down earlier instead of
+    // arriving at a corner too fast and only THEN targeting a lower apex
+    // speed. A flat pace multiplier here on top of that would double-count
+    // the same grip reduction without fixing the late-braking root cause.
+    // Cap raised 1.04 -> 1.15 + slope 0.24 -> 0.19, base 0.84 -> 0.88 (found by
+    // adversarial review, 2026-07-21): the old formula was ALREADY saturated at
+    // 1.04 for rookie and up even before today's DIFFICULTIES bump (rookie's old
+    // skill 0.86 alone gave 1.0464, over the old cap) — so amateur through
+    // impossible were all getting the exact SAME base pace fraction, providing
+    // zero tier-to-tier differentiation from this term (differentiation had to
+    // come entirely from perfBoost/capMs downstream). The new formula keeps
+    // every tier >= its old value (novice ~unchanged, everyone else strictly
+    // higher) while giving genuine per-tier separation up to a raised ceiling —
+    // only Impossible now saturates, which is appropriate for "beyond the limit".
+    const paceMult = Math.min(1.15, 0.88 + ai.skill * 0.19)
       // Loose grip: whole-track rally OR a per-node dirt/gravel biome band (e.g.
       // Highland's Dirt Rally section) — target a gravel-appropriate corner speed
       // so the AI doesn't run wide on the asphalt profile and grind the rail.
@@ -291,12 +330,23 @@ export class AIEngine {
     }
     // Baseline sloppiness, independent of the player, scaled hard by (1-skill)^2
     // so LOW tiers genuinely make errors (and are beatable) while high tiers are
-    // near-flawless. 1.28 (was 1.6, -20% for the across-the-board rivals buff)
-    // still gives Novice ~1 slip / 19 s and Rookie ~1 / 40 s, while the
-    // (1-skill)^2 term keeps Pro+ (and skill>=1 tiers) at effectively zero.
+    // near-flawless. NOTE: because this term is QUADRATIC in (1-skill), a small
+    // skill bump at the bottom shrinks the mistake RATE disproportionately more
+    // than the same bump would at the top — i.e. it makes that tier harder
+    // faster than the skill number alone suggests. The 2026-07-21 DIFFICULTIES
+    // bump (found by adversarial review) took Novice's baseline mistake interval
+    // from ~19s to ~30s and Rookie's from ~40s to ~78s (both tiers' skill only
+    // moved +0.04) — fewer unforced AI errors is squarely "harder", just a
+    // bigger jump than the skill delta implies. Tune future changes at the
+    // BOTTOM of the skill ramp with this quadratic sensitivity in mind, not
+    // linear intuition, or Novice/Rookie can accidentally stop feeling beatable.
     if (ai.mistakeTimer <= 0 && ai.mistakeType === 'none') {
       const sloppy = Math.max(0, 1 - ai.skill); // >=0 so impossible (skill>1) never errs
-      if (Math.random() < sloppy * sloppy * 1.28 * dt) {
+      // Wet weather multiplier (1.35x): even a skilled driver slips up more on a
+      // slick surface — modest since the (1-skill)^2 term already keeps Pro+ near
+      // zero regardless, so this mainly shows up for the lower/mid tiers.
+      const wetMistakeMult = isWet ? 1.35 : 1;
+      if (Math.random() < sloppy * sloppy * 1.28 * wetMistakeMult * dt) {
         ai.mistakeTimer = 0.5 + Math.random() * 1.0;
         ai.mistakeType = Math.random() > 0.6 ? 'lockup' : 'wide';
       }
@@ -313,7 +363,11 @@ export class AIEngine {
     // modulate better and lift LESS, carrying more speed through corners.
     throttle *= 1 - Math.min(0.55, Math.abs(steer) * 0.5) * (1.15 - ai.skill * 0.45);
     // Traction control: cut power when EITHER rear wheel starts spinning up.
-    if (Math.max(Math.abs(st.wheels.rl.slipRatio), Math.abs(st.wheels.rr.slipRatio)) > 0.25) throttle *= 0.35;
+    // Tighter threshold in the wet (0.25 -> 0.18) — on reduced grip, wheelspin
+    // builds into a power-oversteer slide faster, so the AI needs to back off
+    // sooner to avoid spinning out of corners it could hold on a dry surface.
+    const tcThreshold = isWet ? 0.18 : 0.25;
+    if (Math.max(Math.abs(st.wheels.rl.slipRatio), Math.abs(st.wheels.rr.slipRatio)) > tcThreshold) throttle *= 0.35;
     // Don't accelerate into the player's bumper.
     if (playerDist < 8 && playerAhead > 0 && speedMs > Math.abs(playerState.vx)) { brake = Math.max(brake, 0.5); throttle = 0; }
     // Lift when right on ANY car's bumper (incl. other AI) while swerving out.
