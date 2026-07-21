@@ -474,17 +474,38 @@ export function updateVehicle(
   //
   // maxSteer is a GEOMETRIC wheel angle (radians): the front tyre force is
   // longFront*cos(delta)/etc, so once delta approaches pi/2 (~1.57 rad) cos()
-  // collapses toward 0 and then FLIPS SIGN — the car steers the WRONG WAY. The
-  // old `0.86 * sensitivity` let the slider (up to 3.0) push the commanded angle
-  // to ~2.5 rad (140°+), which inverted the steering direction and spun the car
-  // at any slider value above ~1.8. So the sensitivity slider must NOT scale the
-  // raw geometric lock without bound: cap maxSteer well below pi/2 (cos(1.1) ~
-  // 0.45, still safely positive). At sensitivity 1.0 this is exactly 0.86 (the
-  // validated baseline — unchanged); higher slider values raise the lock a
-  // little then plateau, and the REST of the sensitivity effect is carried by
-  // the assist yaw ceiling (latLimit * sensitivity) and yaw clamp below, which
-  // scale turn-in EAGERNESS without ever inverting the tyre-force direction.
-  const maxSteer = Math.min(1.1, 0.86 * sensitivity);
+  // collapses toward 0 and then FLIPS SIGN — the car steers the WRONG WAY. So
+  // the sensitivity slider must NOT scale the raw geometric lock without bound:
+  // cap maxSteer well below pi/2 (cos(1.2) ~ 0.36, safely positive). At
+  // sensitivity 1.0 this is exactly 0.86 (the validated baseline — unchanged).
+  // PIECEWISE curve, ceiling re-derived THREE times (2026-07-22, dead-slider-
+  // range fix — see the memory file for the full history): below 1.0 this is
+  // the original straight `0.86 * sensitivity` (unchanged, already validated).
+  // ABOVE 1.0 the old formula was the SAME multiplier, which hit its 1.1
+  // ceiling by sensitivity ~1.28 — the slider's whole upper range (130%-300%)
+  // changed NOTHING ("the setting isn't working"). Two ceiling choices were
+  // tried and rejected before this one: 1.1 (the original "safe" ceiling)
+  // measurably worsens a PRE-EXISTING, sensitivity-independent instability
+  // (sustained hard cornering under throttle triggers a tyre-heat feedback
+  // spiral that spins ANY car out given several unbroken seconds of held
+  // input, even at sensitivity 1.0 — a separate bug, out of scope here); then
+  // 0.95, chosen to avoid that, turned out to make the slider's whole 130%-
+  // 300% range change yaw response by only ~5% relative — mathematically
+  // non-flat but not something a player can actually feel, i.e. still "not
+  // working" in practice. This value (1.2) is calibrated instead against a
+  // clean, isolated turn-in test (throttle=0 so no wheelspin/tyre-heat
+  // confound): it gives a ~40% relative yaw-response change across 1.0-3.0,
+  // comparable in magnitude to the already-good 0.7-1.0 range below, and at
+  // REALISTIC hold durations (1.5-2s, not an unbroken 4+ second corner) it
+  // does not measurably worsen the separate tyre-heat instability's onset.
+  // (Also tried adding new gain instead — faster steer-rate / stronger assist
+  // convergence — but headless testing showed ANY extra gain in this feedback
+  // loop, delta -> betaF -> kinYaw -> yawRate -> delta, reopens the old wash-
+  // out even toward an already-grip-safe target, so that approach was
+  // abandoned in favour of just spreading this ceiling across the slider.)
+  const maxSteer = sensitivity <= 1
+    ? 0.86 * sensitivity
+    : Math.min(1.2, 0.86 + (sensitivity - 1) * 0.17);
   // Retain far more lock at speed (floor 0.74 -> 0.86) so the front bites at
   // every velocity, not just in town.
   const speedFactor = Math.max(0.86, 1 / (1 + speedKmh / 270));
@@ -729,7 +750,15 @@ export function updateVehicle(
   // turn-in via maxSteer + steer-rate + the yaw clamp, but it can no longer
   // over-rotate the car past what the tyres hold. (At the 1.0 default this is a
   // no-op — 1.70*1.0 < 1.85 — it only tames the slider's upper range.)
-  const latFactor = Math.min(1.85, 1.70 * sensitivity);
+  // PIECEWISE above 1.0 (dead-slider-range fix — see the maxSteer comment above
+  // for the full history of ceiling values tried and why: 1.85 measurably
+  // worsens a separate, pre-existing tyre-heat instability; 1.75 was safe but
+  // imperceptible (~5% relative response over the WHOLE 130%-300% range); 2.20
+  // is calibrated against a clean isolated turn-in test to give a genuinely
+  // felt ~40% relative response, comparable to the 0.7-1.0 range below).
+  const latFactor = sensitivity <= 1
+    ? 1.70 * sensitivity
+    : Math.min(2.20, 1.70 + (sensitivity - 1) * 0.25);
   const latLimit = ((muFront + muRearEff) * 0.5 * gripUnif * g) / Math.max(3, speedMs) * latFactor;
   const kinYaw = Math.max(-latLimit, Math.min(latLimit, kinYawRaw));
   // Assist strengthened 4.0 -> 8.0, per-frame cap 0.5 -> 1.0, floor 0.68 -> 0.95:
@@ -756,11 +785,16 @@ export function updateVehicle(
   // maxSteer is bounded (no inversion), the assist's yaw target (latLimit *
   // sensitivity) is the real sensitivity lever — but at high slider values it
   // was slamming straight into this fixed 2.0 ceiling, so 1.5x and 3.0x felt
-  // identical. Scaling the ceiling with sqrt(sensitivity) (gentler than linear,
-  // so the top end stays controllable rather than a pure spin) lets higher
-  // settings genuinely rotate faster: 2.0 at 1.0x, ~2.45 at 1.5x, ~3.46 at 3.0x.
-  // Capped at 3.6 rad/s so even 300% can't become an unrecoverable helicopter.
-  const yawClamp = Math.min(2.15, 2.0 * Math.sqrt(sensitivity));
+  // identical. Scaling the ceiling with sqrt(sensitivity) below 1.0 (gentler
+  // than linear, so the top end stays controllable rather than a pure spin)
+  // lets lower settings feel meaningfully calmer: ~1.67 at 0.7x, 2.0 at 1.0x.
+  // PIECEWISE above 1.0 (dead-slider-range fix — see the maxSteer comment above
+  // for the full history: 2.15 measurably worsens a separate pre-existing
+  // instability, 2.05 was safe but imperceptible; 2.30 gives a genuinely felt
+  // response, calibrated the same way as latFactor above).
+  const yawClamp = sensitivity <= 1
+    ? 2.0 * Math.sqrt(sensitivity)
+    : Math.min(2.30, 2.0 + (sensitivity - 1) * 0.15);
   state.vz = Math.max(-13.6, Math.min(13.6, state.vz));
   state.yawRate = Math.max(-yawClamp, Math.min(yawClamp, state.yawRate));
 
