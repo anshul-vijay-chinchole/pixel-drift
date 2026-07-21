@@ -633,8 +633,8 @@ export const App: React.FC = () => {
               <div className="sens-row">
                 <input
                   type="range"
-                  min={0.7}
-                  max={3.0}
+                  min={0.5}
+                  max={5.0}
                   step={0.05}
                   value={stats.steerSensitivity}
                   onChange={e => setSteerSensitivity(Number(e.target.value))}

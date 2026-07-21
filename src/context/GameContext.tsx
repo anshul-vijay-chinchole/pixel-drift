@@ -182,7 +182,7 @@ export interface PlayerStats {
   rallyRating: number;
   garage: Record<string, CarLoadout>;
   activeCarId: string;
-  steerSensitivity: number; // Settings slider (0.7-3.0, default 1.0) — scales steering lock + the assist's yaw ceiling, uniformly for every car
+  steerSensitivity: number; // Settings slider (0.5-5.0, default 1.0) — scales steering lock + the assist's yaw ceiling, uniformly for every car
 }
 
 export type TrackId = 'metro' | 'circuit' | 'highway' | 'drag' | 'rally' | 'city' | 'canyon' | 'oval' | 'seaside' | 'apex';
@@ -444,7 +444,7 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const setSteerSensitivity = (v: number) => {
-    const clamped = Math.max(0.7, Math.min(3.0, v));
+    const clamped = Math.max(0.5, Math.min(5.0, v));
     setStats(prev => ({ ...prev, steerSensitivity: clamped }));
   };
 
