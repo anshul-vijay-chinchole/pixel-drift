@@ -581,6 +581,39 @@ export function updateVehicle(
   else if (spec.driveType === 'FWD') { driveFront = tractiveForce; }
   else { driveRear = tractiveForce; }
 
+  const FzFront = Fz.fl + Fz.fr;
+  const FzRear = Fz.rl + Fz.rr;
+  const muFront = (wheelMu(state.wheels.fl) + wheelMu(state.wheels.fr)) * 0.5;
+  let muRearEff = (wheelMu(state.wheels.rl) + wheelMu(state.wheels.rr)) * 0.5 * 1.32 * res.rearLatMult;
+  // Locked diff loosens the rear under power; open diff plants it.
+  if (res.diff === 'locked' && throttle > 0.35) muRearEff *= 0.9;
+
+  const handbrake = inputs.handbrake;
+  // TRACTION CONTROL (2026-07-22) — the hypercar power pass (873-1289 hp on ~1-tonne
+  // cars) puts MANY times the tyre's grip through the driven axle across almost the
+  // whole speed range (measured rear slip ratios of 20-99 = fully lit-up tyres). The
+  // friction ellipse's longitudinal priority then always saturated the drive
+  // direction and starved the axle's LATERAL grip -> the car power-oversteered
+  // ("drifted") constantly at every speed on every surface (worst on low grip). Cap
+  // the DRIVE force to a fraction of the axle's grip so lateral grip is left over.
+  // STEERING-AWARE: near-full drive when going straight (strong launches, and because
+  // we cap the DEMAND not just the delivered force there's still zero wheelspin),
+  // clamped down hard the instant you steer so cornering stays planted -> the car
+  // tracks under power and only slides when you deliberately stomp it mid-corner (or
+  // pull the handbrake). Grip-relative, so it self-scales on gravel/snow/wet too.
+  // The drag floor keeps it from ever limiting top speed (at Vmax the drive force is
+  // just aero drag, far below grip). Gated off under handbrake and eased for
+  // locked-diff/drift-tyre builds (their lower muRearEff lowers the cap). AI drives
+  // through this too, which also stops the AI power-spinning.
+  const tcCap = Math.max(0.55, 0.88 - Math.abs(inputs.steering) * 1.9);
+  if (!handbrake && throttle > 0.05 && dirGear > 0) {
+    const dragEst = 0.5 * 1.225 * spec.dragCoefficient * res.dragMult * 2.1 * state.vx * state.vx;
+    const rearCap = Math.max(muRearEff * FzRear * tcCap, dragEst * 1.1);
+    const frontCap = Math.max(muFront * FzFront * tcCap, dragEst * 1.1);
+    if (driveRear > rearCap) driveRear = rearCap;
+    if (driveFront > frontCap) driveFront = frontCap;
+  }
+
   // 8200 N baseline sits just UNDER the tyre grip limit for stock brakes, so
   // brake upgrades (and the per-car brakes stat) genuinely shorten stops —
   // 12500 exceeded every car's grip and made all brake choices no-ops.
@@ -588,18 +621,10 @@ export function updateVehicle(
   const brakeForceTotal = inputs.brake * brakeMax;
   const dirLong = state.vx >= 0 ? 1 : -1;
   const rollResist = (12 * mass) / 1000 * dirLong * surface.drag;
-  const handbrake = inputs.handbrake;
 
   let longFront = driveFront - dirLong * (brakeForceTotal * 0.62) - rollResist * 0.5;
   let longRear = driveRear - dirLong * (brakeForceTotal * 0.38) - rollResist * 0.5;
   if (handbrake) longRear -= dirLong * 9000;
-
-  const FzFront = Fz.fl + Fz.fr;
-  const FzRear = Fz.rl + Fz.rr;
-  const muFront = (wheelMu(state.wheels.fl) + wheelMu(state.wheels.fr)) * 0.5;
-  let muRearEff = (wheelMu(state.wheels.rl) + wheelMu(state.wheels.rr)) * 0.5 * 1.32 * res.rearLatMult;
-  // Locked diff loosens the rear under power; open diff plants it.
-  if (res.diff === 'locked' && throttle > 0.35) muRearEff *= 0.9;
 
   let latFront = -pacejkaLateral(slipFront, muFront) * FzFront;
   let latRear = -pacejkaLateral(slipRear, muRearEff) * FzRear;
@@ -695,7 +720,17 @@ export function updateVehicle(
   // input — so at high speed the wheel could go from "weak" to "does nothing"
   // once the car started sliding. High-speed feel is now tuned via the player
   // sensitivity setting below instead of a single global constant.)
-  const latLimit = ((muFront + muRearEff) * 0.5 * gripUnif * g) / Math.max(3, speedMs) * 1.70 * sensitivity;
+  // Sensitivity's effect on the yaw CEILING must be BOUNDED (2026-07-22): the raw
+  // `1.70 * sensitivity` let a high slider value push the ceiling to several times
+  // the grip-limited yaw, so the assist commanded far more rotation than the tyres
+  // could deliver -> the car rotated past grip into a permanent slip (washed out /
+  // "drifted"), worst on heavy high-grip cars. The memory-documented wash-out edge
+  // is ~1.70; cap the effective factor just past it. Sensitivity still sharpens
+  // turn-in via maxSteer + steer-rate + the yaw clamp, but it can no longer
+  // over-rotate the car past what the tyres hold. (At the 1.0 default this is a
+  // no-op — 1.70*1.0 < 1.85 — it only tames the slider's upper range.)
+  const latFactor = Math.min(1.85, 1.70 * sensitivity);
+  const latLimit = ((muFront + muRearEff) * 0.5 * gripUnif * g) / Math.max(3, speedMs) * latFactor;
   const kinYaw = Math.max(-latLimit, Math.min(latLimit, kinYawRaw));
   // Assist strengthened 4.0 -> 8.0, per-frame cap 0.5 -> 1.0, floor 0.68 -> 0.95:
   // the car snaps to its commanded cornering attitude about twice as fast, which

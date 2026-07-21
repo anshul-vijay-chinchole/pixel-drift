@@ -182,7 +182,7 @@ export interface PlayerStats {
   rallyRating: number;
   garage: Record<string, CarLoadout>;
   activeCarId: string;
-  steerSensitivity: number; // Settings slider (0.7-3.0, default 2.0) — scales steering lock + the assist's yaw ceiling, uniformly for every car
+  steerSensitivity: number; // Settings slider (0.7-3.0, default 1.0) — scales steering lock + the assist's yaw ceiling, uniformly for every car
 }
 
 export type TrackId = 'metro' | 'circuit' | 'highway' | 'drag' | 'rally' | 'city' | 'canyon' | 'oval' | 'seaside' | 'apex';
@@ -355,6 +355,8 @@ const LEGACY_DEFAULT_COLOR = '#e63946';
 export const carColor = (carId: string): string => CAR_COLORS[carId] ?? LEGACY_DEFAULT_COLOR;
 
 const SAVE_KEY = 'pixel_drift_v1';
+// Marker for the one-time steering-sensitivity reset (see GameProvider load).
+const SENS_MIGRATION_KEY = 'pixel_drift_sens_migrated_v1';
 
 const freshStats = (): PlayerStats => ({
   credits: 0,
@@ -365,7 +367,12 @@ const freshStats = (): PlayerStats => ({
   rallyRating: 0,
   garage: { ae86: { ...DEFAULT_LOADOUT, color: '#f0f0f0', plate: 'INITIAL' } },
   activeCarId: 'ae86',
-  steerSensitivity: 2.0 // default 200% (was 100%) — still adjustable 70-300% in the Esc settings menu
+  // Default back to 100% (2026-07-22): with the hypercar power roster, a 200%
+  // default over-rotated every car past its grip into a constant slide ("cars
+  // only drifting constantly"). At 100% the steering is still direct (maxSteer
+  // 0.86, the tuned baseline) and the cars TRACK. The slider still goes to 300%
+  // in the Esc menu for anyone who wants the loose, tail-happy feel.
+  steerSensitivity: 1.0
 });
 
 // Always merge onto DEFAULT_LOADOUT so a partial or older-schema saved loadout
@@ -395,6 +402,18 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
         // and a colour the player picks from now on — even #e63946 — is kept.
         for (const lo of Object.values(loaded.garage || {})) {
           if (lo && lo.color === LEGACY_DEFAULT_COLOR) lo.color = '';
+        }
+        // One-time migration (2026-07-22): the short-lived 200% default steering
+        // over-rotated the hypercar roster into a constant slide. Anyone who
+        // played that version has 2.0 (or near it) persisted here, so lowering
+        // the freshStats default alone would NOT reach them. Reset a saved
+        // sensitivity that is still at/above the old default (>=1.6, all of which
+        // wash these cars out) down to the new 100% default — ONCE. The marker
+        // means a player who deliberately re-raises the slider afterwards keeps
+        // their choice.
+        if (!localStorage.getItem(SENS_MIGRATION_KEY)) {
+          if ((loaded.steerSensitivity ?? 1) >= 1.6) loaded.steerSensitivity = 1.0;
+          localStorage.setItem(SENS_MIGRATION_KEY, '1');
         }
         return loaded;
       }
