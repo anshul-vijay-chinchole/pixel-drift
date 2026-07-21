@@ -129,10 +129,10 @@ export class AIEngine {
     // through the pool (pool[i % pool.length]) so a big grid just repeats the
     // matched cars in different liveries. The pool size is FIXED at the 6 closest
     // by power and is NOT scaled by `count` — the old `Math.max(count, 6)` meant a
-    // large grid (11/13/15 rivals) pulled in almost the whole roster, so with the
-    // now-widened 200..430 hp spread a 200 hp player could face a 430 hp rival
-    // (a 2.15x gap). Capping the pool keeps every rival power-matched at any grid
-    // size (worst case now ~1.5x, the closest-6 span, instead of 2.15x).
+    // large grid (11/13/15 rivals) pulled in almost the whole roster, which would
+    // let a low-power player face a much higher-power rival. Capping the pool
+    // keeps every rival power-matched at any grid size (worst case ~1.26x, the
+    // closest-6 span, against the current 873-1289 hp roster).
     const byPower = [...carDb].sort((a, b) => Math.abs(a.specs.power - playerPower) - Math.abs(b.specs.power - playerPower));
     const pool = byPower.slice(0, Math.min(carDb.length, 6)).sort(() => Math.random() - 0.5);
 

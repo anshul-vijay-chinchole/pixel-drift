@@ -141,9 +141,9 @@ export const Garage: React.FC<GarageProps> = ({ onClose }) => {
             <div className="stats-panel card-glow">
               <h3>BUILD STATS</h3>
               <div className="car-stats-bars">
-                {statRow('POWER', current.power, stock.power, 490, ' hp')}
-                {statRow('TOP SPD', current.topSpeed, stock.topSpeed, 360, ' km/h')}
-                {statRow('ACCEL', current.accel * 100, stock.accel * 100, 68)}
+                {statRow('POWER', current.power, stock.power, 1650, ' hp')}
+                {statRow('TOP SPD', current.topSpeed, stock.topSpeed, 480, ' km/h')}
+                {statRow('ACCEL', current.accel * 100, stock.accel * 100, 225)}
                 {statRow('GRIP', current.grip * 100, stock.grip * 100, 125)}
                 {statRow('HANDLING', current.handling * 10, stock.handling * 10, 122)}
                 {statRow('BRAKES', current.braking * 40, stock.braking * 40, 130)}

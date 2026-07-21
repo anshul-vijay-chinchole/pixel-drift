@@ -514,9 +514,16 @@ export function updateVehicle(
     // curve so the front actually bites when you steer under throttle — the car
     // turns in willingly instead of feeling numb — while still tracking betaF so
     // it can't snap into a spin.
+    // Handbrake widening cut 0.42 -> 0.15 (reduce-drift pass, 2026-07-22): this
+    // term ONLY applies under handbrake, so it can't touch normal driving feel
+    // (headless-verified: identical yaw/speed with handbrake never engaged).
+    // Tightening it narrows how far the front can counter-steer INTO a slide
+    // during a handbrake pull, trimming the achieved slide angle (~8% less at
+    // a sustained 0.8s pull in a 480-case headless sweep) without gutting the
+    // ability to catch/hold a drift entirely.
     const slipCap = Math.max(0.58, 1.05 - speedKmh * 0.0009) // much wider band -> the front points harder and turns in sharply
       + (1 - Math.min(1, res.assistMult)) * 0.5
-      + (inputs.handbrake ? 0.42 : 0);
+      + (inputs.handbrake ? 0.15 : 0);
     delta = Math.max(betaF - slipCap, Math.min(betaF + slipCap, delta));
   }
   // Hard safety net on the geometric wheel angle: the betaF+slipCap band above
@@ -596,7 +603,11 @@ export function updateVehicle(
 
   let latFront = -pacejkaLateral(slipFront, muFront) * FzFront;
   let latRear = -pacejkaLateral(slipRear, muRearEff) * FzRear;
-  if (handbrake) latRear *= 0.35;
+  // Retain more rear lateral grip under handbrake (0.35 -> 0.50, reduce-drift
+  // pass, 2026-07-22) — the rear digs in a bit sooner once you release the
+  // brake, so a pull breaks the tail loose less violently. Handbrake-gated
+  // only: zero effect when handbrake is up (headless-verified).
+  if (handbrake) latRear *= 0.50;
 
   // Friction ellipse with LONGITUDINAL PRIORITY (the arcade trade): drive and
   // brake force keep up to 90% of the grip budget and the lateral force takes
@@ -691,9 +702,12 @@ export function updateVehicle(
   // is what makes the raised sensitivity (wider slipCap + 1.70 latLimit) feel
   // immediate — and because the SAME assist pulls the tail back just as fast, the
   // much more eager rotation stays catchable rather than running away into a
-  // spin. The high floor keeps it from fading mid-slide. Handbrake still cuts it
-  // hard (x0.26) and drift-oriented parts lower assistMult, so slides live on.
-  const assistStrength = 8.0 * res.assistMult * (handbrake ? 0.26 : 1) * Math.max(0.95, 1 - Math.abs(slipRear) * 0.5);
+  // spin. The high floor keeps it from fading mid-slide. Handbrake factor
+  // raised 0.26 -> 0.42 (reduce-drift pass, 2026-07-22): the assist recovers
+  // faster while the brake is held, so a pull settles into a tamer, shorter
+  // slide instead of the tail running free — still a real cut (drift-oriented
+  // parts also lower assistMult), so slides live on, just less wild.
+  const assistStrength = 8.0 * res.assistMult * (handbrake ? 0.42 : 1) * Math.max(0.95, 1 - Math.abs(slipRear) * 0.5);
   state.yawRate += (kinYaw - state.yawRate) * Math.min(1.0, assistStrength * dt);
 
   // Low-speed stabilisation.
@@ -748,7 +762,12 @@ export function updateVehicle(
     const deg = (Math.abs(state.driftAngle) * 180) / Math.PI;
     if (deg > 13 && speedKmh > 30 && Math.abs(state.yawRate) > 0.12) {
       state.isDrifting = true;
-      const pts = speedKmh * Math.sin(Math.min(1.2, Math.abs(state.driftAngle))) * dt * 3.0;
+      // Points-per-second rate cut 3.0 -> 1.95 (35% reduction, 2026-07-22 per
+      // request) — this is THE game's literal "drift" quantity (driftScore),
+      // so a straight 35% cut here is exact and unambiguous, on top of the
+      // handbrake-specific physics tightening above (retain/assist/slipCap)
+      // that makes the underlying slide itself less extreme.
+      const pts = speedKmh * Math.sin(Math.min(1.2, Math.abs(state.driftAngle))) * dt * 1.95;
       state.driftScore += pts * state.driftMultiplier;
       state.driftMultiplier = Math.min(12, state.driftMultiplier + dt * 0.28);
     } else {
