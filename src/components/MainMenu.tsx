@@ -52,7 +52,7 @@ export const MainMenu: React.FC<MainMenuProps> = ({ onOpenGarage }) => {
   const { stats, cars, selectCar, startRace } = useGame();
   const [activeTab, setActiveTab] = useState<'race' | 'cars'>('race');
 
-  const [selectedTrack, setSelectedTrack] = useState<TrackId>('circuit');
+  const [selectedTrack, setSelectedTrack] = useState<TrackId>('metro');
   const [selectedWeather, setSelectedWeather] = useState<WeatherType>('sunny');
   const [laps, setLaps] = useState<number>(3);
   const [gridSize, setGridSize] = useState<number>(5);
@@ -107,6 +107,7 @@ export const MainMenu: React.FC<MainMenuProps> = ({ onOpenGarage }) => {
                     className={`track-card ${selectedTrack === t.id ? 'selected' : ''}`}
                     onClick={() => setSelectedTrack(t.id as TrackId)}
                   >
+                    {t.flagship && <span className="flagship-badge">★ FLAGSHIP</span>}
                     <TrackThumb points={t.idealLine} closed={t.isClosed} active={selectedTrack === t.id} />
                     <div className="track-card-info">
                       <span className="track-card-name">{t.name}</span>
@@ -141,7 +142,7 @@ export const MainMenu: React.FC<MainMenuProps> = ({ onOpenGarage }) => {
                 <div className="option-group">
                   <label>OPPONENTS</label>
                   <select value={gridSize} onChange={e => setGridSize(Number(e.target.value))} disabled={selectedTrack === 'drag'} className="menu-select">
-                    {[1, 3, 5, 7, 9].map(n => <option key={n} value={n}>{n} Rivals</option>)}
+                    {[1, 3, 5, 7, 9, 11, 13, 15].map(n => <option key={n} value={n}>{n} Rivals</option>)}
                   </select>
                 </div>
                 <div className="option-group">

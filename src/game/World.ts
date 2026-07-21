@@ -31,6 +31,7 @@ export interface TrackDefinition {
   idealLine: THREE.Vector2[];
   length: number; // metres (filled at build)
   biomes?: BiomeBand[]; // optional per-section biomes (multi-biome flagship)
+  flagship?: boolean;   // marquee track — badged in the menu, bigger payout
 }
 
 // How far past the road edge you can go before the invisible wall / drop-off,
@@ -189,6 +190,36 @@ export class TrackBuilder {
  * hairpins and esses (no more featureless ovals).
  * ==========================================================================*/
 export const TRACKS: Record<string, TrackDefinition> = {
+  // FLAGSHIP — a 3.1 km downtown street circuit in the spirit of the Downtown
+  // Night Circuit, but far more technical: four sharp 90° street corners, a
+  // Casino-style chicane, a flowing top esses complex, a second left chicane
+  // and a signature bottom-left hairpin, linked by two long straights. Tight
+  // concrete-walled run-off (theme 'city'). Geometry validated headlessly:
+  // 3148 m, max per-node curvature 0.132 (~3.3x the old downtown), min corner
+  // radius 13.1 m (6.1 m inner-edge clearance — no folds), zero self-crossings,
+  // dead-straight start/finish for a clean grid.
+  metro: {
+    id: 'metro', name: 'Metropolis Night GP', theme: 'city', flagship: true,
+    description: 'THE flagship. A 3.1 km neon street circuit: two long straights bookended by sharp 90° corners, a casino chicane, a rhythmic esses section and a brutal bottom-left hairpin — walls everywhere, zero run-off.',
+    width: 14, isClosed: true, groundColor: '#121220', roadColor: '#2a2a33',
+    points: [
+      new THREE.Vector3(120, 0, -310), new THREE.Vector3(330, 0, -308),                 // 0-1: START/FINISH + long bottom straight
+      new THREE.Vector3(430, 0, -305), new THREE.Vector3(468, 0, -270), new THREE.Vector3(470, 0, -215), // T1: sharp 90° right
+      new THREE.Vector3(455, 0, -110),                                                    // right straight
+      new THREE.Vector3(500, 0, -50), new THREE.Vector3(450, 0, 7), new THREE.Vector3(500, 0, 64),        // Casino chicane
+      new THREE.Vector3(475, 0, 168),                                                     // right straight
+      new THREE.Vector3(472, 0, 238), new THREE.Vector3(436, 0, 290), new THREE.Vector3(366, 0, 302),     // T2: sharp 90° left
+      new THREE.Vector3(255, 0, 266), new THREE.Vector3(175, 0, 324), new THREE.Vector3(70, 0, 278),      // top esses
+      new THREE.Vector3(-55, 0, 330), new THREE.Vector3(-192, 0, 290),                    // esses cont.
+      new THREE.Vector3(-322, 0, 324), new THREE.Vector3(-424, 0, 292), new THREE.Vector3(-470, 0, 224),  // T3: sharp 90° top-left
+      new THREE.Vector3(-455, 0, 110),                                                    // left straight
+      new THREE.Vector3(-500, 0, 18), new THREE.Vector3(-446, 0, -70),                    // left chicane
+      new THREE.Vector3(-478, 0, -172),                                                   // left straight
+      new THREE.Vector3(-462, 0, -246), new THREE.Vector3(-414, 0, -304), new THREE.Vector3(-334, 0, -320), new THREE.Vector3(-250, 0, -288), // HAIRPIN (signature)
+      new THREE.Vector3(-90, 0, -305), new THREE.Vector3(30, 0, -308),                    // bottom straight back onto the S/F line
+    ],
+    idealLine: [], length: 0
+  },
   circuit: {
     id: 'circuit', name: 'Harbour GP Circuit', theme: 'harbour',
     description: 'Seaside GP track: long pit straight, fast T1 sweeper, dock chicane, a proper hairpin and a rhythm section of esses.',

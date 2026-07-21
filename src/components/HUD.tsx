@@ -30,6 +30,7 @@ interface HUDProps {
   gearboxLabel: string;
   clutchHeld: boolean;
   isManual: boolean;
+  maxGear: number; // top forward gear (gearRatios.length) — so the upshift hint hides when there's no gear to grab
   onToggleCamera: () => void;
   onToggleMute: () => void;
   onPause: () => void;
@@ -38,7 +39,7 @@ interface HUDProps {
 export const HUD: React.FC<HUDProps> = ({
   playerState, standings, trackPoints, opponents, redline, boostMax, lapsCount, currentLap,
   racePosition, timeElapsed, bestLapTime, cameraMode, isMuted,
-  gearboxLabel, clutchHeld, isManual,
+  gearboxLabel, clutchHeld, isManual, maxGear,
   onToggleCamera, onToggleMute, onPause
 }) => {
   const mapRef = useRef<HTMLCanvasElement | null>(null);
@@ -102,7 +103,12 @@ export const HUD: React.FC<HUDProps> = ({
   const gear = (g: number) => (g === -1 ? 'R' : g === 0 ? 'N' : g.toString());
   const rpmPct = Math.min(1, playerState.engineRpm / redline);
   const redlineNear = rpmPct > 0.92;
-  const showShiftHint = isManual && redlineNear && playerState.activeGear >= 1;
+  // Only prompt an upshift when one is actually possible: a driver-shifted box
+  // (isManual already excludes auto AND electric), near redline, currently in a
+  // forward gear, and NOT already in top gear (activeGear < maxGear). Before the
+  // maxGear check the "SHIFT ⬆ (E)" hint blinked in the final gear, where E does
+  // nothing.
+  const showShiftHint = isManual && redlineNear && playerState.activeGear >= 1 && playerState.activeGear < maxGear;
   const tireClass = (w: { temp: number; wear: number; isPunctured: boolean }) =>
     w.isPunctured ? 'tire-punctured' : w.temp > 108 ? 'tire-hot' : w.wear > 0.6 ? 'tire-worn' : 'tire-good';
 

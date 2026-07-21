@@ -514,7 +514,7 @@ export const App: React.FC = () => {
     const place = posRef.current;
     const total = oppsRef.current.length + 1;
     const placeBonus = place === 1 ? 2.0 : place === 2 ? 1.5 : place === 3 ? 1.2 : place <= total / 2 ? 0.9 : 0.6;
-    const base = config.trackId === 'drag' ? 1600 : 3000;
+    const base = config.trackId === 'metro' ? 4200 : config.trackId === 'drag' ? 1600 : 3000; // flagship pays more
     const drift = Math.floor(p.driftScore);
     const diffMult = difficultyPayout(config.difficulty);
     const credits = Math.floor((base * placeBonus + drift * 0.2) * diffMult);
@@ -679,6 +679,7 @@ export const App: React.FC = () => {
           gearboxLabel={gearboxLabel}
           clutchHeld={!!keys.current['shift']}
           isManual={loadoutRef.current.gearbox !== 'auto' && loadoutRef.current.engine !== 'electric'}
+          maxGear={carDefRef.current?.specs.gearRatios.length ?? 6}
           onToggleCamera={cycleCam}
           onToggleMute={toggleMute}
           onPause={togglePause}

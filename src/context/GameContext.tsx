@@ -179,7 +179,7 @@ export interface PlayerStats {
   steerSensitivity: number; // Settings slider (0.7-3.0, default 1.0) — scales steering lock + the assist's yaw ceiling, uniformly for every car
 }
 
-export type TrackId = 'circuit' | 'highway' | 'drag' | 'rally' | 'city' | 'canyon' | 'oval' | 'seaside' | 'apex';
+export type TrackId = 'metro' | 'circuit' | 'highway' | 'drag' | 'rally' | 'city' | 'canyon' | 'oval' | 'seaside' | 'apex';
 export type WeatherType = 'sunny' | 'rainy' | 'snowy' | 'foggy' | 'night';
 export type RaceMode = 'circuit' | 'touge' | 'sprint' | 'drag' | 'drift' | 'freeroam';
 
