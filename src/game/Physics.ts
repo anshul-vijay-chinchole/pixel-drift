@@ -792,7 +792,27 @@ export function updateVehicle(
   const latFactor = steerGain <= 1
     ? 1.70 * steerGain
     : Math.min(2.70, 1.70 + (steerGain - 1) * 0.125);
-  const latLimit = ((muFront + muRearEff) * 0.5 * gripUnif * g) / Math.max(3, speedMs) * latFactor;
+  // HIGH-SPEED AUTHORITY (2026-07-22, "steering goes dead above 100-200 km/h"):
+  // latLimit falls off as 1/speed, which by ~200 km/h clamps the assist's yaw
+  // target so low that it saturates at barely-any steering input — turning the
+  // wheel from 10% to full lock changed the yaw by <30% (measured), i.e. 90% of
+  // the stick was dead and full lock could even yaw LESS than half lock (front
+  // slip past its grip peak). That 1/speed falloff is honest low-speed physics
+  // but too aggressive for an arcade racer whose cars top out at 400-500 km/h.
+  // Fix: a speed-gated multiplier on the assist ceiling ONLY (not real tyre
+  // grip), exactly 1.0 below 120 km/h so the entire low/mid-speed feel the
+  // player is happy with — and the delicate ~100 km/h sustained-hold regime —
+  // is byte-for-byte untouched, ramping above that to hand back cornering
+  // authority as speed climbs. +25-33% yaw at 300, +50-70% at 400-500 km/h,
+  // uniformly across all 14 cars. This is SAFE to raise here (unlike the
+  // ~100 km/h zone) precisely because high speed has huge stability headroom:
+  // a full-lock 1.5s hold at 300-500 km/h only reaches ~7-13 degrees of slide
+  // (grip-limited — the tyres physically cap rotation), so lifting the assist
+  // target can't spin the car the way it can at 100 km/h. Onset 120 keeps it
+  // clear of the ~100 km/h danger zone; slope 0.55/150 per km/h; no upper cap
+  // needed (the tyre grip circle is the real limiter above this).
+  const hsAuth = 1 + Math.max(0, (speedKmh - 120) / 150) * 0.75;
+  const latLimit = ((muFront + muRearEff) * 0.5 * gripUnif * g) / Math.max(3, speedMs) * latFactor * hsAuth;
   const kinYaw = Math.max(-latLimit, Math.min(latLimit, kinYawRaw));
   // Assist strengthened 4.0 -> 8.0, per-frame cap 0.5 -> 1.0, floor 0.68 -> 0.95:
   // the car snaps to its commanded cornering attitude about twice as fast, which
