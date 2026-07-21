@@ -263,10 +263,14 @@ export class AIEngine {
     const targetIdx = isClosed ? (idx + laOff) % n : Math.min(n - 1, idx + laOff);
     const tnode = trackPoints[targetIdx];
 
-    // Apex-seeking: bias toward the inside of the upcoming corner.
+    // Apex-seeking: bias toward the inside of the upcoming corner. Apex
+    // commitment raised 0.28 -> 0.336 (+20%, "more logical" line): the AI hugs
+    // the inside of a corner more decisively, taking a tighter, faster racing
+    // line instead of drifting mid-track. Still bounded by the `half` clamp
+    // below and the boundary-awareness correction, so it can't clip the edge.
     const turnDir = TrackBuilder.turnDirection(trackPoints, targetIdx);
     const cornerTightness = Math.min(1, tnode.curvature * 60);
-    let offset = ai.lineOffset * (1 - cornerTightness) - turnDir * cornerTightness * (seg.width * 0.28) * ai.skill;
+    let offset = ai.lineOffset * (1 - cornerTightness) - turnDir * cornerTightness * (seg.width * 0.336) * ai.skill;
 
     // Player interaction.
     const pdx = playerState.x - st.x, pdz = playerState.z - st.z;
@@ -278,18 +282,21 @@ export class AIEngine {
     // blind to each other and pile up). Right-component is along body-frame
     // physics-right; +offset displaces along the track normal = physics-LEFT,
     // so an obstacle on the right needs +offset to swing away.
+    // Awareness range 10 -> 12 m (+20%, "more logical" traffic handling): the
+    // AI notices a car ahead ~20% sooner and begins its line adjustment earlier
+    // and more smoothly, instead of a last-second jink at 10 m.
     let obDist = Infinity, obRight = 0;
     const consider = (x: number, z: number) => {
       const dx = x - st.x, dz = z - st.z;
       const d = Math.hypot(dx, dz);
-      if (d > 10 || d >= obDist) return;
+      if (d > 12 || d >= obDist) return;
       if (dx * sy + dz * cy <= 0) return; // behind us — not our problem
       obDist = d; obRight = dx * cy - dz * sy;
     };
     consider(playerState.x, playerState.z);
     for (const o of others) if (o !== ai && !o.finished) consider(o.state.x, o.state.z);
 
-    if (obDist < 10) {
+    if (obDist < 12) {
       offset += (obRight > 0 ? 1 : -1) * 2.2;
     } else if (ai.profile === 'defensive' && playerDist < 22 && playerAhead < 0) {
       offset *= 0.25; // park it on the racing line
@@ -321,7 +328,7 @@ export class AIEngine {
       if (ai.mistakeTimer <= 0) ai.mistakeType = 'none';
     } else if (playerDist < 14 && Math.abs(playerState.vx) > speedMs && playerAhead < 0) {
       ai.pressureRating = Math.min(1, ai.pressureRating + dt * 0.12);
-      if (Math.random() < Math.max(0, 1 - ai.skill) * 0.064 * ai.pressureRating * dt) { // -20%: rivals crack under pressure less
+      if (Math.random() < Math.max(0, 1 - ai.skill) * 0.051 * ai.pressureRating * dt) { // 0.064 -> 0.051 (-20%): rivals hold their nerve under attack, defending more logically
         ai.mistakeTimer = 0.8 + Math.random() * 1.4;
         ai.mistakeType = Math.random() > 0.5 ? 'lockup' : 'wide';
       }
@@ -380,7 +387,11 @@ export class AIEngine {
       handbrake = true; steer *= 1.25; throttle = Math.max(throttle, 0.6); brake = 0;
     }
 
-    ai.inputs.steering += (steer - ai.inputs.steering) * Math.min(1, dt * 10);
+    // Line-tracking responsiveness 10 -> 12 (+20%): the AI's steering converges
+    // on its intended line ~20% faster, so it holds a cleaner, more precise line
+    // through transitions and reacts quicker to corrections — "better and more
+    // logical" without simply removing mistakes.
+    ai.inputs.steering += (steer - ai.inputs.steering) * Math.min(1, dt * 12);
     ai.inputs.throttle = throttle;
     ai.inputs.brake = brake;
     ai.inputs.handbrake = handbrake;

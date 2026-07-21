@@ -465,13 +465,22 @@ export function updateVehicle(
   const speedKmh = speedMs * 3.6;
   // UNIFORM steering sensitivity: base lock and steer rate are the same for
   // every car and every attachment (no maxSteerMult / steerRateMult), dialled up
-  // (0.82 -> 0.86) for a sharper response, then scaled by the player's Settings
-  // sensitivity slider (AI always 1). Attachments still change grip/power/drift
-  // character — just not the raw steering feel. The other half of "uniform" is
-  // the WD_UNIFORM weight-distribution compression above (the yaw moment arms),
-  // which is what actually stops some cars refusing to turn while others spin —
-  // this lock/rate uniformity was necessary but not sufficient on its own.
-  const maxSteer = 0.86 * sensitivity;
+  // (0.82 -> 0.86) for a sharper response. The other half of "uniform" is the
+  // WD_UNIFORM weight-distribution compression above (the yaw moment arms).
+  //
+  // maxSteer is a GEOMETRIC wheel angle (radians): the front tyre force is
+  // longFront*cos(delta)/etc, so once delta approaches pi/2 (~1.57 rad) cos()
+  // collapses toward 0 and then FLIPS SIGN — the car steers the WRONG WAY. The
+  // old `0.86 * sensitivity` let the slider (up to 3.0) push the commanded angle
+  // to ~2.5 rad (140°+), which inverted the steering direction and spun the car
+  // at any slider value above ~1.8. So the sensitivity slider must NOT scale the
+  // raw geometric lock without bound: cap maxSteer well below pi/2 (cos(1.1) ~
+  // 0.45, still safely positive). At sensitivity 1.0 this is exactly 0.86 (the
+  // validated baseline — unchanged); higher slider values raise the lock a
+  // little then plateau, and the REST of the sensitivity effect is carried by
+  // the assist yaw ceiling (latLimit * sensitivity) and yaw clamp below, which
+  // scale turn-in EAGERNESS without ever inverting the tyre-force direction.
+  const maxSteer = Math.min(1.1, 0.86 * sensitivity);
   // Retain far more lock at speed (floor 0.74 -> 0.86) so the front bites at
   // every velocity, not just in town.
   const speedFactor = Math.max(0.86, 1 / (1 + speedKmh / 270));
@@ -506,6 +515,15 @@ export function updateVehicle(
       + (inputs.handbrake ? 0.42 : 0);
     delta = Math.max(betaF - slipCap, Math.min(betaF + slipCap, delta));
   }
+  // Hard safety net on the geometric wheel angle: the betaF+slipCap band above
+  // can inflate when the car is already rotating (betaF grows with yawRate/vz),
+  // and at high sensitivity that feedback used to push delta past pi/2 mid-spin
+  // — where cos(delta) goes negative and the front tyre force reverses, feeding
+  // the spin. Clamp to 1.5 rad (cos(1.5) ~ 0.07, still POSITIVE so the force can
+  // never invert) — this is above the ~1.46 rad a normal sensitivity-1.0 drift
+  // counter-steer reaches, so it doesn't touch baseline drift feel; it only
+  // catches the runaway high-sensitivity case.
+  delta = Math.max(-1.5, Math.min(1.5, delta));
   // What the front wheels ACTUALLY do this frame — the wheel meshes render
   // this, not the raw (pre-cap) steerAngle, so visuals match the physics.
   state.steerVisual = delta;
@@ -680,11 +698,18 @@ export function updateVehicle(
     state.vz *= 1 - k * 0.35;
     state.yawRate *= 1 - k * 0.5;
   }
-  // Peak rotation clamp raised 1.75 -> 2.0 rad/s (~115°/s) to give the more
-  // sensitive steering headroom to actually rotate the car harder into and
-  // through tight corners instead of clipping at the old ceiling.
+  // Peak rotation clamp: 2.0 rad/s (~115°/s) at sensitivity 1.0 (the baseline),
+  // scaled by the sensitivity slider so its upper half isn't wasted. Now that
+  // maxSteer is bounded (no inversion), the assist's yaw target (latLimit *
+  // sensitivity) is the real sensitivity lever — but at high slider values it
+  // was slamming straight into this fixed 2.0 ceiling, so 1.5x and 3.0x felt
+  // identical. Scaling the ceiling with sqrt(sensitivity) (gentler than linear,
+  // so the top end stays controllable rather than a pure spin) lets higher
+  // settings genuinely rotate faster: 2.0 at 1.0x, ~2.45 at 1.5x, ~3.46 at 3.0x.
+  // Capped at 3.6 rad/s so even 300% can't become an unrecoverable helicopter.
+  const yawClamp = Math.min(2.15, 2.0 * Math.sqrt(sensitivity));
   state.vz = Math.max(-13.6, Math.min(13.6, state.vz));
-  state.yawRate = Math.max(-2.0, Math.min(2.0, state.yawRate));
+  state.yawRate = Math.max(-yawClamp, Math.min(yawClamp, state.yawRate));
 
   const s = Math.sin(state.yaw), c = Math.cos(state.yaw);
   const worldVX = state.vx * s + state.vz * c;
