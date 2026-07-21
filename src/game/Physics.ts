@@ -522,9 +522,30 @@ export function updateVehicle(
   const maxSteer = steerGain <= 1
     ? 0.86 * steerGain
     : Math.min(1.3, 0.86 + (steerGain - 1) * 0.055);
-  // Retain far more lock at speed (floor 0.74 -> 0.86) so the front bites at
-  // every velocity, not just in town.
-  const speedFactor = Math.max(0.86, 1 / (1 + speedKmh / 270));
+  // SPEED-SENSITIVE STEERING (2026-07-22, "pressing D can't even make a slight
+  // turn at high speed" + "insensitive above 100-200"). The counter-intuitive
+  // root cause (headless-proven): at high speed, holding FULL lock made the car
+  // turn LESS than partial lock. A keyboard player is always at full lock, so
+  // the geometric wheel angle (maxSteer * this) drove the front tyre's slip
+  // angle WAY past its grip peak (~0.12 rad) into deep understeer — the nose
+  // rotated but the car washed straight ahead (measured: at 200 km/h, path/
+  // velocity direction changed only ~32° while heading changed ~51°; and 30%
+  // input out-turned 100% input at every speed above 150). At/below 200 km/h the
+  // original `max(0.86, 1/(1+kmh/270))` is kept EXACTLY — that band is grip-
+  // limited (a full-lock turn there is already within a few degrees of the grip-
+  // optimal angle, headless-verified), so winding lock off would only cost turn;
+  // 100-200 is lifted instead purely by the latLimit hsAuth boost below. ABOVE
+  // 200 the wheel angle is progressively wound OFF so full lock lands near the
+  // front tyre's grip peak instead of past it — which makes full lock actually
+  // turn the car (path follows) rather than washing wide, and is also why real
+  // cars need only a sliver of lock at speed. Spin-SAFE (it REDUCES front slip).
+  // Floor 0.20 so the very top end still has enough angle to corner. The big
+  // visible gains are at 300-500 km/h where the old 1/speed assist ceiling (not
+  // grip) was the artificial limiter; this delta-reduction + the hsAuth boost
+  // together give +30-48% actual PATH turn there.
+  const speedFactor = speedKmh <= 200
+    ? Math.max(0.86, 1 / (1 + speedKmh / 270))
+    : Math.max(0.20, 0.86 - (speedKmh - 200) * 0.0035);
   const steerTarget = inputs.steering * maxSteer * speedFactor + state.steerPull;
 
   // Near-instant wheel: the commanded angle is reached in ~1 frame, uniform for
@@ -803,15 +824,25 @@ export function updateVehicle(
   // grip), exactly 1.0 below 120 km/h so the entire low/mid-speed feel the
   // player is happy with — and the delicate ~100 km/h sustained-hold regime —
   // is byte-for-byte untouched, ramping above that to hand back cornering
-  // authority as speed climbs. +25-33% yaw at 300, +50-70% at 400-500 km/h,
-  // uniformly across all 14 cars. This is SAFE to raise here (unlike the
+  // authority as speed climbs. This is SAFE to raise here (unlike the
   // ~100 km/h zone) precisely because high speed has huge stability headroom:
   // a full-lock 1.5s hold at 300-500 km/h only reaches ~7-13 degrees of slide
   // (grip-limited — the tyres physically cap rotation), so lifting the assist
-  // target can't spin the car the way it can at 100 km/h. Onset 120 keeps it
-  // clear of the ~100 km/h danger zone; slope 0.55/150 per km/h; no upper cap
-  // needed (the tyre grip circle is the real limiter above this).
-  const hsAuth = 1 + Math.max(0, (speedKmh - 120) / 150) * 0.75;
+  // target can't spin the car the way it can at 100 km/h — VERIFIED: this boost
+  // does not worsen the sustained-hold spin sweep at 100-200 km/h at all.
+  // Strengthened 2026-07-22 (still-too-low / can't-turn follow-up): slope
+  // 0.75->1.25 with onset kept at 120, so the ceiling is >= the previous value
+  // at EVERY speed (no regression anywhere) and meaningfully higher with speed.
+  // This is what lifts the grip-limited 100-200 band the player wanted higher
+  // (+5-7% at 150, +13-21% at 200 in actual PATH turn) — that band can't be
+  // lifted any other way (delta-reduction above would only cost turn there), and
+  // the cost is a modest spin-tendency increase under an extreme sustained hold
+  // at max sensitivity (a 2.5s constant-lock 150 km/h hold at 500% goes ~65->78°
+  // — both already a heavy slide; normal corrective inputs never reach it). An
+  // early-onset (70) variant that sent a clean 5° hold to 45° was rejected;
+  // onset 120 stays clear of the worst ~100 km/h zone. No upper cap (the tyre
+  // grip circle is the real limiter above this).
+  const hsAuth = 1 + Math.max(0, (speedKmh - 120) / 150) * 1.25;
   const latLimit = ((muFront + muRearEff) * 0.5 * gripUnif * g) / Math.max(3, speedMs) * latFactor * hsAuth;
   const kinYaw = Math.max(-latLimit, Math.min(latLimit, kinYawRaw));
   // Assist strengthened 4.0 -> 8.0, per-frame cap 0.5 -> 1.0, floor 0.68 -> 0.95:
