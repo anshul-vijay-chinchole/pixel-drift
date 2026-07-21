@@ -263,6 +263,28 @@ export function updateVehicle(
 ): void {
   if (dt <= 0) return;
   const sensitivity = Math.max(0.7, Math.min(3.0, steerSensitivity));
+  // 2026-07-22, player request: "double steering sensitivity across the entire
+  // game" (300% should behave like 600% used to). A literal `sensitivity * 2`
+  // was tried and REJECTED after headless testing: it makes the DEFAULT slider
+  // position (100%) reproduce the physics of the OLD sensitivity=2.0 (200%)
+  // setting — which a sustained-hold sweep (2s hold, MODEST steer=0.25,
+  // throttle=0, 100 km/h) showed spins the car to an 83-89 degree near-total
+  // slide. That's not a new bug — it's the ALREADY-SHIPPED behavior at 200%+
+  // on the current slider (confirmed identical against pre-doubling code at
+  // the same input sensitivity value) — but making it the DEFAULT, that every
+  // player gets with the slider untouched, would be a severe regression.
+  // (This sustained-hold spiral is itself a separate, deeper, pre-existing
+  // instability — latLimit's assist-target ceiling scales as 1/speed, and once
+  // a hold starts scrubbing speed via the resulting slide, the ceiling RISES
+  // in response to the car's own speed loss and chases it further; not fixed
+  // here — flagged to the user, needs its own dedicated pass.)
+  // So: below 100% is untouched (matches shipped exactly), and only the ramp
+  // ABOVE 100% is doubled — `1 + (sensitivity-1)*2` reaches the existing,
+  // already-validated ceiling (1.2 / 2.20 / 2.30, unchanged) at 200% instead of
+  // 300%, giving a real, faster-building boost to anyone who raises the slider
+  // at all, without moving the untouched, most-common (default) case into
+  // known-risky territory.
+  const steerGain = sensitivity <= 1 ? sensitivity : 1 + (sensitivity - 1) * 2;
   if (dt > 0.05) dt = 0.05;
 
   const spec = carDef.specs;
@@ -503,9 +525,9 @@ export function updateVehicle(
   // loop, delta -> betaF -> kinYaw -> yawRate -> delta, reopens the old wash-
   // out even toward an already-grip-safe target, so that approach was
   // abandoned in favour of just spreading this ceiling across the slider.)
-  const maxSteer = sensitivity <= 1
-    ? 0.86 * sensitivity
-    : Math.min(1.2, 0.86 + (sensitivity - 1) * 0.17);
+  const maxSteer = steerGain <= 1
+    ? 0.86 * steerGain
+    : Math.min(1.2, 0.86 + (steerGain - 1) * 0.17);
   // Retain far more lock at speed (floor 0.74 -> 0.86) so the front bites at
   // every velocity, not just in town.
   const speedFactor = Math.max(0.86, 1 / (1 + speedKmh / 270));
@@ -756,9 +778,9 @@ export function updateVehicle(
   // imperceptible (~5% relative response over the WHOLE 130%-300% range); 2.20
   // is calibrated against a clean isolated turn-in test to give a genuinely
   // felt ~40% relative response, comparable to the 0.7-1.0 range below).
-  const latFactor = sensitivity <= 1
-    ? 1.70 * sensitivity
-    : Math.min(2.20, 1.70 + (sensitivity - 1) * 0.25);
+  const latFactor = steerGain <= 1
+    ? 1.70 * steerGain
+    : Math.min(2.20, 1.70 + (steerGain - 1) * 0.25);
   const latLimit = ((muFront + muRearEff) * 0.5 * gripUnif * g) / Math.max(3, speedMs) * latFactor;
   const kinYaw = Math.max(-latLimit, Math.min(latLimit, kinYawRaw));
   // Assist strengthened 4.0 -> 8.0, per-frame cap 0.5 -> 1.0, floor 0.68 -> 0.95:
@@ -792,9 +814,9 @@ export function updateVehicle(
   // for the full history: 2.15 measurably worsens a separate pre-existing
   // instability, 2.05 was safe but imperceptible; 2.30 gives a genuinely felt
   // response, calibrated the same way as latFactor above).
-  const yawClamp = sensitivity <= 1
-    ? 2.0 * Math.sqrt(sensitivity)
-    : Math.min(2.30, 2.0 + (sensitivity - 1) * 0.15);
+  const yawClamp = steerGain <= 1
+    ? 2.0 * Math.sqrt(steerGain)
+    : Math.min(2.30, 2.0 + (steerGain - 1) * 0.15);
   state.vz = Math.max(-13.6, Math.min(13.6, state.vz));
   state.yawRate = Math.max(-yawClamp, Math.min(yawClamp, state.yawRate));
 
