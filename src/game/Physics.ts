@@ -16,7 +16,12 @@ import { CarDefinition, CarLoadout } from '../context/GameContext';
  *      mapping (App.tsx) and the minimap projection (HUD.tsx) compensate.
  *
  *  Feel target: 80% Forza Horizon / 20% GT — weighty but forgiving. The
- *  stability assist is clamped to the grip circle so it can never *add* spin.
+ *  stability assist tracks a UNIFORM yaw target (see the latLimit block): below
+ *  the grip crossover it's the grip-limited neutral-steer rate, but above it a
+ *  speed-independent floor deliberately commands rotation past the grip circle,
+ *  so at speed the car steers hard and DRIFTS on purpose (player-chosen). The
+ *  friction-ellipse tyres, vz clamp and yawClamp bound how wild that gets, and
+ *  releasing the wheel drops the target so the assist always straightens up.
  * ============================================================================
  */
 
@@ -511,14 +516,13 @@ export function updateVehicle(
   // wheelspin/tyre-heat confound): new-max(500%) gives +59-63% more yaw
   // response than default at 100 km/h and +24-36% at 500 km/h, vs. the old
   // max(300%)'s +32-34%/+13-16% — a real, felt increase, not just a relabelled
-  // ceiling. The DEFAULT (100%) is verified byte-identical to before this
-  // change. Caveat, found and NOT fixed this pass: an unrelated, pre-existing
-  // instability (see the latLimit comment below) already spins most cars out
-  // under a truly sustained — 1.5s+, unwavering — steering hold around
-  // ~100 km/h, and it's present almost identically at the default AND the new
-  // max (84° vs 90° worst-case in an intentionally adversarial headless
-  // sweep) — so raising this ceiling does not meaningfully worsen that
-  // specific scenario, it was already broken there.
+  // ceiling. (Those turn-in %s predate the uniform-floor redesign of latLimit
+  // below, which superseded the earlier hsAuth boost; maxSteer itself is
+  // unchanged by that redesign — it still just sets the geometric wheel angle.)
+  // A truly sustained (1.5s+), unwavering full-lock hold around ~100 km/h will
+  // drift most cars hard — that is now the intended floor-driven behaviour
+  // (the player accepts drifting), and releasing the wheel always recovers it;
+  // see the latLimit block below.
   const maxSteer = steerGain <= 1
     ? 0.86 * steerGain
     : Math.min(1.3, 0.86 + (steerGain - 1) * 0.055);
@@ -534,15 +538,15 @@ export function updateVehicle(
   // original `max(0.86, 1/(1+kmh/270))` is kept EXACTLY — that band is grip-
   // limited (a full-lock turn there is already within a few degrees of the grip-
   // optimal angle, headless-verified), so winding lock off would only cost turn;
-  // 100-200 is lifted instead purely by the latLimit hsAuth boost below. ABOVE
+  // 100-200 is lifted instead by the uniform yaw FLOOR in latLimit below. ABOVE
   // 200 the wheel angle is progressively wound OFF so full lock lands near the
   // front tyre's grip peak instead of past it — which makes full lock actually
   // turn the car (path follows) rather than washing wide, and is also why real
   // cars need only a sliver of lock at speed. Spin-SAFE (it REDUCES front slip).
-  // Floor 0.20 so the very top end still has enough angle to corner. The big
-  // visible gains are at 300-500 km/h where the old 1/speed assist ceiling (not
-  // grip) was the artificial limiter; this delta-reduction + the hsAuth boost
-  // together give +30-48% actual PATH turn there.
+  // Floor 0.20 so the very top end still has enough angle to corner. This
+  // delta-reduction pairs with the uniform yaw floor in latLimit below: the
+  // floor guarantees the ROTATION authority at speed, this keeps the front
+  // tyre near its peak so the PATH follows that rotation as well as grip allows.
   const speedFactor = speedKmh <= 200
     ? Math.max(0.86, 1 / (1 + speedKmh / 270))
     : Math.max(0.20, 0.86 - (speedKmh - 200) * 0.0035);
@@ -749,101 +753,77 @@ export function updateVehicle(
   state.yawRate += yawAcc * dt;
   state.yawRate *= Math.max(0, 1 - dt * 1.1);
 
-  // Stability assist: pull yaw toward the *grip-limited* neutral-steer rate.
-  // Clamping to the grip circle means the assist can only calm the car,
-  // never whip it around. Fades under handbrake / big rear slip so
-  // deliberate drifts stay alive.
+  // Stability assist: pull yaw toward the target `latLimit` (built below). At low
+  // speed that target is the grip-limited neutral-steer rate (the assist only
+  // calms the car); above the grip crossover it's the uniform floor, which sits
+  // ABOVE the grip circle on purpose, so the assist there actively rotates the
+  // car into a drift (the player-chosen "steer hard at any speed"). kinYawRaw is
+  // the raw kinematic yaw the current wheel angle implies; latLimit clamps it.
   const kinYawRaw = (state.vx * Math.tan(delta)) / wheelbase;
-  // latLimit shapes ONLY the assist's yaw target (not the tyre grip that sets
-  // real cornering/braking limits), so it is the safe place to tune STEERING
-  // FEEL. Raised 1.05 -> 1.18 for markedly more eager, less-numb cornering. The
-  // catch: on its own that let balanced RWD cars snap-oversteer, so it is paired
-  // with a much higher assist floor below (0.68 -> 0.88) that keeps the tail in
-  // check. Swept across 2016 scenarios (14 cars x street/grippy/drift loadouts x
-  // dry/wet x 6 speeds x 4 inputs): this pair is +24% more responsive AND spins
-  // roughly HALF as often as the old tune (18 vs 38), so it is both sharper and
-  // more planted. gripUnif additionally compresses the per-car cornering-rate
-  // spread ~40% toward a fleet-reference grip so low- and high-grip cars respond
-  // to the wheel more alike (uniform feel) without touching real grip (±~3%).
+  // latFactor shapes ONLY the grip-limited part of the assist's yaw target
+  // (gripYaw, below) — NOT the tyre grip that sets real cornering/braking limits
+  // — so it is the safe place to tune low/mid-speed STEERING FEEL. It governs
+  // BELOW the grip crossover (~50-90 km/h); above it the uniform floor takes
+  // over and latFactor no longer sets the target (high-speed feel now flows
+  // through the floor + its floorScale, not this). gripUnif compresses the
+  // per-car cornering-rate spread ~40% toward a fleet-reference grip so low- and
+  // high-grip cars respond to the wheel more alike, without touching real grip.
   const REF_GRIP = 0.89; // ~fleet-average baseGrip
   const gripUnif = Math.pow(REF_GRIP / spec.baseGrip, 0.4);
-  // Yaw ceiling raised 1.18 -> 1.70 so the car is allowed to rotate a lot more
-  // eagerly (paired with the much stronger assist below, which keeps that extra
-  // rotation catchable). This is grip-limited at high speed — the tyres cap how
-  // fast a car can physically rotate — so it lifts low/mid-speed cornering most.
-  // (A speed-falloff-softening experiment here was reverted: it raised the
-  // ceiling at high speed which let yawRate/vz grow further before the
-  // steering-limit assist's betaF-based delta cap engaged, and once that cap
-  // engages it tracks betaF (the car's OWN slide angle) instead of the driver's
-  // input — so at high speed the wheel could go from "weak" to "does nothing"
-  // once the car started sliding. High-speed feel is now tuned via the player
-  // sensitivity setting below instead of a single global constant.)
-  // Sensitivity's effect on the yaw CEILING must be BOUNDED (2026-07-22): the raw
-  // `1.70 * sensitivity` let a high slider value push the ceiling to several times
-  // the grip-limited yaw, so the assist commanded far more rotation than the tyres
-  // could deliver -> the car rotated past grip into a permanent slip (washed out /
-  // "drifted"), worst on heavy high-grip cars. The memory-documented wash-out edge
-  // is ~1.70; cap the effective factor just past it. Sensitivity still sharpens
-  // turn-in via maxSteer + steer-rate + the yaw clamp, but it can no longer
-  // over-rotate the car past what the tyres hold. (At the 1.0 default this is a
-  // no-op — 1.70*1.0 < 1.85 — it only tames the slider's upper range.)
+  // Base 1.70 (the memory-documented wash-out edge for the grip-limited term).
   // PIECEWISE above 1.0 — full history of every ceiling tried lives in the
-  // memory file (see the maxSteer comment above for a pointer). Raised again
-  // 2.20 -> 2.70 (2026-07-22, "still too low" follow-up) alongside widening
-  // the slider to 50-500% and doubling steerGain's ramp above 100% — see
-  // maxSteer above for the validated response-magnitude numbers (this is the
-  // single biggest contributor to that felt increase, since it directly scales
-  // the assist's yaw-rate TARGET, latLimit, below).
-  // NOTE: `latLimit` itself divides by the CURRENT speed, which is a genuine,
-  // pre-existing, SEPARATE instability (not introduced or worsened by this
-  // ceiling change) — investigated this pass, not fixed. A held, perfectly
-  // CONSTANT steering input around ~100 km/h can spin the car over 1.5-3s even
-  // at the 100% default: the assist's target keeps up with the car's OWN
-  // slide-induced speed loss, which lets it demand more rotation, which sheds
-  // more speed. A rate-limiter on the ceiling's rise (tried first) barely
-  // helped — headless testing with latLimit forced to an unconditional
-  // CONSTANT showed the instability is a threshold on the STEADY-STATE value
-  // (~0.5-0.6 rad/s for ae86 at 100 km/h), not really about how fast it rises
-  // — so this needs an actual control-loop redesign (e.g. rate/derivative
-  // damping, or a lower sustained-hold target), not a quick patch. Confirmed
-  // NOT worsened by raising this ceiling (84° vs 90° worst-case, default vs
-  // new max, in the same adversarial sweep) and confirmed NOT present at true
-  // high speed (400-500 km/h stays a gentle 8-11° under the same test) — see
-  // the memory file for the full reproduction case and investigation.
+  // memory file (see the maxSteer comment above for a pointer). Ceiling 2.70,
+  // slope-matched to saturate at exactly steerGain 9 (the 500% slider end) like
+  // the other sensitivity constants. Since the floor now guarantees high-speed
+  // authority, latFactor's job is just "how eager is turn-in at town/mid speed."
   const latFactor = steerGain <= 1
     ? 1.70 * steerGain
     : Math.min(2.70, 1.70 + (steerGain - 1) * 0.125);
-  // HIGH-SPEED AUTHORITY (2026-07-22, "steering goes dead above 100-200 km/h"):
-  // latLimit falls off as 1/speed, which by ~200 km/h clamps the assist's yaw
-  // target so low that it saturates at barely-any steering input — turning the
-  // wheel from 10% to full lock changed the yaw by <30% (measured), i.e. 90% of
-  // the stick was dead and full lock could even yaw LESS than half lock (front
-  // slip past its grip peak). That 1/speed falloff is honest low-speed physics
-  // but too aggressive for an arcade racer whose cars top out at 400-500 km/h.
-  // Fix: a speed-gated multiplier on the assist ceiling ONLY (not real tyre
-  // grip), exactly 1.0 below 120 km/h so the entire low/mid-speed feel the
-  // player is happy with — and the delicate ~100 km/h sustained-hold regime —
-  // is byte-for-byte untouched, ramping above that to hand back cornering
-  // authority as speed climbs. This is SAFE to raise here (unlike the
-  // ~100 km/h zone) precisely because high speed has huge stability headroom:
-  // a full-lock 1.5s hold at 300-500 km/h only reaches ~7-13 degrees of slide
-  // (grip-limited — the tyres physically cap rotation), so lifting the assist
-  // target can't spin the car the way it can at 100 km/h — VERIFIED: this boost
-  // does not worsen the sustained-hold spin sweep at 100-200 km/h at all.
-  // Strengthened 2026-07-22 (still-too-low / can't-turn follow-up): slope
-  // 0.75->1.25 with onset kept at 120, so the ceiling is >= the previous value
-  // at EVERY speed (no regression anywhere) and meaningfully higher with speed.
-  // This is what lifts the grip-limited 100-200 band the player wanted higher
-  // (+5-7% at 150, +13-21% at 200 in actual PATH turn) — that band can't be
-  // lifted any other way (delta-reduction above would only cost turn there), and
-  // the cost is a modest spin-tendency increase under an extreme sustained hold
-  // at max sensitivity (a 2.5s constant-lock 150 km/h hold at 500% goes ~65->78°
-  // — both already a heavy slide; normal corrective inputs never reach it). An
-  // early-onset (70) variant that sent a clean 5° hold to 45° was rejected;
-  // onset 120 stays clear of the worst ~100 km/h zone. No upper cap (the tyre
-  // grip circle is the real limiter above this).
-  const hsAuth = 1 + Math.max(0, (speedKmh - 120) / 150) * 1.25;
-  const latLimit = ((muFront + muRearEff) * 0.5 * gripUnif * g) / Math.max(3, speedMs) * latFactor * hsAuth;
+  // UNIFORM ARCADE YAW TARGET (2026-07-22 redesign — "steer hard, uniform
+  // across all speeds, I don't mind drifting"). This replaces the previous
+  // patch stack (a speed-gated hsAuth multiplier layered on the 1/speed grip
+  // ceiling) with one comprehensible rule:
+  //
+  //     latLimit = max( grip-based ceiling ,  speed-UNIFORM yaw floor )
+  //
+  // - The grip term is the honest physics ceiling (falls off as 1/speed). It
+  //   dominates below ~90 km/h, so town-speed handling keeps its familiar,
+  //   naturally-sharper-than-the-floor feel.
+  // - The FLOOR is the arcade guarantee: at ANY speed above that crossover,
+  //   full lock commands at least ~0.95 rad/s of rotation (~54 deg/s heading)
+  //   at the 100% default, scaled up by the sensitivity slider. This is what
+  //   makes steering feel THE SAME at 150, 300 and 500 km/h — the tyres cannot
+  //   actually hold that much lateral force at speed, so the car rotates hard
+  //   and DRIFTS through the corner, scrubbing speed as the natural cost. That
+  //   is the explicit, player-chosen trade: rotation authority is never taken
+  //   away by speed; physics collects its fee in tyre slip instead. (The old
+  //   design clamped the target to grip so the assist could never start a
+  //   slide — which read as "steering doesn't work" above ~150 km/h. The
+  //   friction-ellipse tyre model, vz clamp and yawClamp below still bound how
+  //   violent the resulting slide can get, and releasing the key still drops
+  //   the target so the assist straightens the car out.)
+  // gripAuthority is the SPEED-VARYING numerator shared by both terms below. It
+  // already folds in EVERYTHING that scales real grip — surface (wet/snow/ice),
+  // tyre compound, tyre TEMP and WEAR, chassis DAMAGE, puncture and the AI
+  // perfBoost — because muFront/muRearEff are the fully-resolved per-axle grip.
+  const gripAuthority = (muFront + muRearEff) * 0.5 * gripUnif * g;
+  const gripYaw = gripAuthority / Math.max(3, speedMs) * latFactor;
+  // The uniform floor is simply "gripYaw frozen at VREF" — i.e. the car never
+  // steers WEAKER than it would at VREF (~14 m/s ≈ 50 km/h), no matter how fast
+  // it goes. Deriving it from the SAME gripAuthority is what makes it honest:
+  // on ice, or on hot/worn/damaged tyres, the floor drops in lockstep with the
+  // real grip (a fresh dry car's floor is ~0.95 rad/s; a battered wet one's is a
+  // fraction of that) — so the floor can never command dry-level rotation the
+  // tyres have no chance of tracking, only the "don't let SPEED alone kill the
+  // turn" guarantee the player asked for. floorScale gives the slider a gentler
+  // grip on the floor than latFactor has on gripYaw (the floor already sits past
+  // the grip limit at speed, so scaling it harder only adds pirouette): straight
+  // down-scaling below 100%, and up to 1.75x at the 500% end (slope matched so
+  // it saturates at exactly steerGain 9, like the other sensitivity ceilings).
+  const VREF = 14;
+  const floorScale = steerGain <= 1 ? steerGain : Math.min(1.75, 1 + (steerGain - 1) * 0.09375);
+  const yawFloor = gripAuthority / VREF * floorScale;
+  const latLimit = Math.max(gripYaw, yawFloor);
   const kinYaw = Math.max(-latLimit, Math.min(latLimit, kinYawRaw));
   // Assist strengthened 4.0 -> 8.0, per-frame cap 0.5 -> 1.0, floor 0.68 -> 0.95:
   // the car snaps to its commanded cornering attitude about twice as fast, which
@@ -865,11 +845,12 @@ export function updateVehicle(
     state.yawRate *= 1 - k * 0.5;
   }
   // Peak rotation clamp: 2.0 rad/s (~115°/s) at sensitivity 1.0 (the baseline),
-  // scaled by the sensitivity slider so its upper half isn't wasted. Now that
-  // maxSteer is bounded (no inversion), the assist's yaw target (latLimit *
-  // sensitivity) is the real sensitivity lever — but at high slider values it
-  // was slamming straight into this fixed 2.0 ceiling, so 1.5x and 3.0x felt
-  // identical. Scaling the ceiling with sqrt(sensitivity) below 1.0 (gentler
+  // scaled by the sensitivity slider so its upper half isn't wasted. This is the
+  // hard ceiling on actual yawRate — the last guard on how violent a floor-driven
+  // drift can get. Sensitivity feeds the yaw TARGET internally (via latFactor in
+  // gripYaw and floorScale in the floor), so at high slider values yawRate was
+  // slamming into this fixed 2.0 ceiling and 1.5x/3.0x felt identical; scaling
+  // the ceiling too keeps the slider's upper range live. sqrt below 1.0 (gentler
   // than linear, so the top end stays controllable rather than a pure spin)
   // lets lower settings feel meaningfully calmer: ~1.67 at 0.7x, 2.0 at 1.0x.
   // PIECEWISE above 1.0 — full history in the memory file (see maxSteer

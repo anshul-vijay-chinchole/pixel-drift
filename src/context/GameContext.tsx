@@ -370,7 +370,7 @@ const freshStats = (): PlayerStats => ({
   // Default back to 100% (2026-07-22): with the hypercar power roster, a 200%
   // default over-rotated every car past its grip into a constant slide ("cars
   // only drifting constantly"). At 100% the steering is still direct (maxSteer
-  // 0.86, the tuned baseline) and the cars TRACK. The slider still goes to 300%
+  // 0.86, the tuned baseline) and the cars TRACK. The slider goes up to 500%
   // in the Esc menu for anyone who wants the loose, tail-happy feel.
   steerSensitivity: 1.0
 });

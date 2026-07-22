@@ -643,7 +643,7 @@ export const App: React.FC = () => {
                 <span className="sens-value">{Math.round(stats.steerSensitivity * 100)}%</span>
               </div>
               <div className="sens-hint">
-                <span>Numb / Safe</span><span>Default</span><span>Sharp</span><span>Extreme / Twitchy</span>
+                <span>Numb / Safe</span><span>Sharp</span><span>Extreme / Twitchy</span>
               </div>
             </div>
             <div className="controls-ref">
