@@ -533,6 +533,13 @@ export function updateVehicle(
   // drift most cars hard — that is now the intended floor-driven behaviour
   // (the player accepts drifting), and releasing the wheel always recovers it;
   // see the latLimit block below.
+  // 2026-07-22, "double it from 500% to 1000%": maxSteer does NOT get a second
+  // ramp segment and stays flat at 1.3 past 500% — it is the one constant with
+  // a HARD geometric wall (cos(delta) inverts past pi/2), so literally doubling
+  // it (to 2.6 rad) would flip the front tyre's force sign and make the car
+  // steer the wrong way, the exact bug fixed earlier this session. latFactor,
+  // yawClamp and floorScale below (none of which touch the geometric wheel
+  // angle) DO get a genuine second segment doubling their 500% value by 1000%.
   const maxSteer = steerGain <= 1
     ? 0.86 * steerGain
     : Math.min(1.3, 0.86 + (steerGain - 1) * 0.055);
@@ -782,13 +789,23 @@ export function updateVehicle(
   const gripUnif = Math.pow(REF_GRIP / spec.baseGrip, 0.4);
   // Base 1.70 (the memory-documented wash-out edge for the grip-limited term).
   // PIECEWISE above 1.0 — full history of every ceiling tried lives in the
-  // memory file (see the maxSteer comment above for a pointer). Ceiling 2.70,
-  // slope-matched to saturate at exactly steerGain 9 (the 500% slider end) like
-  // the other sensitivity constants. Since the floor now guarantees high-speed
-  // authority, latFactor's job is just "how eager is turn-in at town/mid speed."
+  // memory file (see the maxSteer comment above for a pointer). First segment
+  // (steerGain 1-9, i.e. slider 100-500%) unchanged, ceiling 2.70, slope-matched
+  // to saturate at exactly steerGain 9. SECOND segment (2026-07-22, "double it
+  // from 500% to 1000%"): a further ramp from steerGain 9-19 (slider 500-1000%)
+  // that exactly doubles the value again by steerGain 19 (5.40) — unlike
+  // maxSteer, latFactor has no geometric wall (it only scales a force
+  // magnitude, not an angle fed through cos/sin), so a literal double is safe
+  // here. Verified via the clean isolated turn-in test: 1000% gives ~1.9-2.0x
+  // the yaw response of 500% at 100-300 km/h (matches the "double" ask
+  // directly), tapering to ~1.75x at 500 km/h where yawClamp becomes the
+  // binding cap instead. Since the floor now guarantees high-speed authority,
+  // latFactor's job is just "how eager is turn-in at town/mid speed."
   const latFactor = steerGain <= 1
     ? 1.70 * steerGain
-    : Math.min(2.70, 1.70 + (steerGain - 1) * 0.125);
+    : steerGain <= 9
+      ? 1.70 + (steerGain - 1) * 0.125
+      : Math.min(5.40, 2.70 + (steerGain - 9) * 0.27);
   // UNIFORM ARCADE YAW TARGET (2026-07-22 redesign — "steer hard, uniform
   // across all speeds, I don't mind drifting"). This replaces the previous
   // patch stack (a speed-gated hsAuth multiplier layered on the 1/speed grip
@@ -828,10 +845,17 @@ export function updateVehicle(
   // turn" guarantee the player asked for. floorScale gives the slider a gentler
   // grip on the floor than latFactor has on gripYaw (the floor already sits past
   // the grip limit at speed, so scaling it harder only adds pirouette): straight
-  // down-scaling below 100%, and up to 1.75x at the 500% end (slope matched so
-  // it saturates at exactly steerGain 9, like the other sensitivity ceilings).
+  // down-scaling below 100%, up to 1.75x at the 500% end (slope matched so it
+  // saturates at exactly steerGain 9), then a second segment (2026-07-22,
+  // "double it from 500% to 1000%") doubling again to 3.50x by steerGain 19 —
+  // like latFactor, floorScale only scales a force magnitude (no geometric
+  // wall), so the literal double is safe here too.
   const VREF = 14;
-  const floorScale = steerGain <= 1 ? steerGain : Math.min(1.75, 1 + (steerGain - 1) * 0.09375);
+  const floorScale = steerGain <= 1
+    ? steerGain
+    : steerGain <= 9
+      ? 1 + (steerGain - 1) * 0.09375
+      : Math.min(3.50, 1.75 + (steerGain - 9) * 0.175);
   const yawFloor = gripAuthority / VREF * floorScale;
   const latLimit = Math.max(gripYaw, yawFloor);
   const kinYaw = Math.max(-latLimit, Math.min(latLimit, kinYawRaw));
@@ -868,9 +892,16 @@ export function updateVehicle(
   // same slider-widening pass as maxSteer/latFactor — all three are
   // deliberately slope-matched to saturate together at exactly the new 500%
   // endpoint (steerGain=9), not before, so there's no dead range partway up.
+  // SECOND segment (2026-07-22, "double it from 500% to 1000%"): doubles again
+  // to 5.40 by steerGain 19 — no geometric wall on a rad/s rotation-rate clamp,
+  // so a literal double is safe; this is also what keeps the doubled
+  // latFactor/floorScale targets above from being clipped back down to the old
+  // 500% ceiling before they can actually deliver more rotation.
   const yawClamp = steerGain <= 1
     ? 2.0 * Math.sqrt(steerGain)
-    : Math.min(2.70, 2.0 + (steerGain - 1) * 0.0875);
+    : steerGain <= 9
+      ? 2.0 + (steerGain - 1) * 0.0875
+      : Math.min(5.40, 2.70 + (steerGain - 9) * 0.27);
   state.vz = Math.max(-13.6, Math.min(13.6, state.vz));
   state.yawRate = Math.max(-yawClamp, Math.min(yawClamp, state.yawRate));
 
