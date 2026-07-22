@@ -182,7 +182,7 @@ export interface PlayerStats {
   rallyRating: number;
   garage: Record<string, CarLoadout>;
   activeCarId: string;
-  steerSensitivity: number; // Settings slider (0.5-5.0, default 1.0) — scales steering lock + the assist's yaw ceiling, uniformly for every car
+  steerSensitivity: number; // Settings slider (0.5-10.0, default 1.0) — scales steering lock + the assist's yaw ceiling, uniformly for every car. Physics ceilings saturate at 5.0 (500%); 500-1000% intentionally maps to the same values as 500% (range extended per player request, "everything as is current" — no re-tune).
 }
 
 export type TrackId = 'metro' | 'circuit' | 'highway' | 'drag' | 'rally' | 'city' | 'canyon' | 'oval' | 'seaside' | 'apex';
@@ -370,8 +370,10 @@ const freshStats = (): PlayerStats => ({
   // Default back to 100% (2026-07-22): with the hypercar power roster, a 200%
   // default over-rotated every car past its grip into a constant slide ("cars
   // only drifting constantly"). At 100% the steering is still direct (maxSteer
-  // 0.86, the tuned baseline) and the cars TRACK. The slider goes up to 500%
-  // in the Esc menu for anyone who wants the loose, tail-happy feel.
+  // 0.86, the tuned baseline) and the cars TRACK. The slider goes up to 1000%
+  // in the Esc menu for anyone who wants the loose, tail-happy feel (physics
+  // ceilings saturate at 500%; 500-1000% is intentionally flat, see the field
+  // comment above).
   steerSensitivity: 1.0
 });
 
@@ -444,7 +446,7 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const setSteerSensitivity = (v: number) => {
-    const clamped = Math.max(0.5, Math.min(5.0, v));
+    const clamped = Math.max(0.5, Math.min(10.0, v));
     setStats(prev => ({ ...prev, steerSensitivity: clamped }));
   };
 

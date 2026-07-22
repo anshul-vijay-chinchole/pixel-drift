@@ -264,10 +264,17 @@ export function updateVehicle(
   carDef: CarDefinition,
   loadout: CarLoadout,
   perfBoost = 1, // AI difficulty bonus: >1 scales grip + power (player always 1)
-  steerSensitivity = 1 // player-facing Settings slider (0.5-5.0); AI always 1
+  steerSensitivity = 1 // player-facing Settings slider (0.5-10.0); AI always 1
 ): void {
   if (dt <= 0) return;
-  const sensitivity = Math.max(0.5, Math.min(5.0, steerSensitivity));
+  // Slider range widened 5.0->10.0 (2026-07-22) at the player's explicit request
+  // to leave the tuning untouched ("everything as is current"). The three
+  // sensitivity ceilings below (maxSteer/latFactor/yawClamp/floorScale) already
+  // saturate at steerGain 9, reached at sensitivity=5.0 — so 500%-1000% is a
+  // DELIBERATE flat zone, identical to 500%, not a bug. If the extra range is
+  // meant to keep growing rather than plateau, the ceilings/slopes need
+  // re-deriving to saturate at 10.0 instead — ask before assuming that's wanted.
+  const sensitivity = Math.max(0.5, Math.min(10.0, steerSensitivity));
   // steerGain is the value the three sensitivity constants below (maxSteer /
   // latFactor / yawClamp) actually consume — it is NOT the same number as the
   // player-facing slider. History (full detail in the memory file):
@@ -281,10 +288,13 @@ export function updateVehicle(
   // (3) 2026-07-22 follow-up ("sensitivity still too low, widen the slider to
   //     50-500%"): the ramp formula itself is unchanged from (2); what moved
   //     is the CEILINGS it ramps toward (1.3 / 2.70 / 2.70, up from 1.2 / 2.20
-  //     / 2.30) and the slider's own clamp (was 0.7-3.0, now 0.5-5.0). The
-  //     ramp multiplier stays 2x so `steerGain` at the new max (500%) is
-  //     1+(5-1)*2=9 — each ceiling's slope below is sized so it saturates
-  //     exactly there, not before.
+  //     / 2.30) and the slider's own clamp (was 0.7-3.0, then 0.5-5.0). The
+  //     ramp multiplier stays 2x so `steerGain` at 500% is 1+(5-1)*2=9 — each
+  //     ceiling's slope below is sized so it saturates exactly there.
+  // (4) 2026-07-22, same day: slider clamp widened again to 0.5-10.0 with the
+  //     ceilings/ramp left untouched ("everything as is current") — so
+  //     steerGain (and every ceiling) simply stops climbing at sensitivity=5.0
+  //     and 500-1000% is flat. See the sensitivity-clamp comment above.
   const steerGain = sensitivity <= 1 ? sensitivity : 1 + (sensitivity - 1) * 2;
   if (dt > 0.05) dt = 0.05;
 
